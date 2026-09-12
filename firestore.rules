@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isValidStatus(status) {
+      return status in ['pending', 'confirmed', 'rejected', 'completed', 'cancelled'];
+    }
+
+    // Regras para agendamentos (bookings)
+    match /bookings/{bookingId} {
+      allow read: if true;
+      allow create: if request.resource.data.teacherName is string
+                    && request.resource.data.whatsapp is string
+                    && request.resource.data.labId is string
+                    && request.resource.data.date is string
+                    && request.resource.data.timeSlot is string
+                    && isValidStatus(request.resource.data.status);
+      allow update: if true;
+      allow delete: if true;
+    }
+
+    // Regras para laboratórios e configurações (labs, labs_config)
+    match /labs/{labId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /labs_config/{configId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Regras para equipe de técnicos (technicians)
+    match /technicians/{technicianId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Regras para configurações gerais (settings)
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
+

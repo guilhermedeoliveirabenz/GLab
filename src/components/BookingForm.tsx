@@ -1,0 +1,1242 @@
+import React, { useState, useEffect } from 'react';
+import { Booking, LAB_LIST, Lab, RecurrenceType, Technician } from '../types';
+import { checkBookingConflict, createBooking, createRecurringBookings } from '../lib/bookingService';
+import { generateRecurrenceDates } from '../lib/recurrenceUtils';
+import { subscribeToTechnicians, getTechniciansForLab } from '../lib/technicianService';
+import { generateTechnicianAlertWhatsAppMessage, getWhatsAppSendUrl } from '../lib/whatsapp';
+import { useAuth } from '../lib/authContext';
+import {
+  Calendar,
+  Clock,
+  User,
+  Users,
+  Phone,
+  Monitor,
+  Truck,
+  MapPin,
+  BookOpen,
+  FileText,
+  CheckCircle2,
+  AlertTriangle,
+  Send,
+  Sparkles,
+  Laptop,
+  Code,
+  Wrench,
+  Bell,
+  Repeat,
+  Info,
+  CalendarDays,
+  Check,
+  X,
+  Copy,
+  ExternalLink,
+  MessageSquare,
+} from 'lucide-react';
+import { playBookingSuccessSound } from '../lib/soundUtils';
+
+interface BookingFormProps {
+  existingBookings: Booking[];
+  labs?: Lab[];
+  preselectedLabId?: string;
+  preselectedDate?: string;
+  onBookingCreated?: (booking: Booking) => void;
+}
+
+export const BookingForm: React.FC<BookingFormProps> = ({
+  existingBookings,
+  labs = LAB_LIST,
+  preselectedLabId,
+  preselectedDate,
+  onBookingCreated,
+}) => {
+  const { teacherSession } = useAuth();
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const defaultDate = preselectedDate || tomorrow.toISOString().split('T')[0];
+
+  const [teacherName, setTeacherName] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
+  const [classGroup, setClassGroup] = useState('');
+  const [subject, setSubject] = useState('');
+  const [labId, setLabId] = useState(preselectedLabId || labs[0]?.id || 'lab-1');
+  const selectedLab = labs.find((l) => l.id === labId) || labs[0] || LAB_LIST[0];
+  const [requestedMachines, setRequestedMachines] = useState<number>(selectedLab.capacity);
+  const [roomNumber, setRoomNumber] = useState('');
+  const [date, setDate] = useState(defaultDate);
+  const [startTime, setStartTime] = useState('07:30');
+  const [endTime, setEndTime] = useState('09:10');
+  const [scheduleLabel, setScheduleLabel] = useState('');
+  const [notes, setNotes] = useState('');
+
+  // Recurring Booking State
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceType>('weekly');
+  const [recurrenceCount, setRecurrenceCount] = useState<number>(4);
+  const [skipWeekends, setSkipWeekends] = useState(true);
+  const [showRecurrenceModal, setShowRecurrenceModal] = useState(false);
+  const [calculatedDates, setCalculatedDates] = useState<string[]>([]);
+  const [recurrenceConflicts, setRecurrenceConflicts] = useState<{ date: string; conflict: Booking }[]>([]);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [successBooking, setSuccessBooking] = useState<Booking | null>(null);
+  const [recurringSuccessCount, setRecurringSuccessCount] = useState<number | null>(null);
+  const [conflictError, setConflictError] = useState<string | null>(null);
+
+  // Technicians subscription for notification dispatch
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [copiedTechMessage, setCopiedTechMessage] = useState(false);
+  const [customTechPhone, setCustomTechPhone] = useState('');
+
+  useEffect(() => {
+    const unsub = subscribeToTechnicians((list) => {
+      setTechnicians(list);
+    });
+    return () => unsub();
+  }, []);
+
+  // Sync session if teacher is logged in
+  useEffect(() => {
+    if (teacherSession) {
+      if (teacherSession.phone && !whatsapp) {
+        setWhatsapp(teacherSession.phone);
+      }
+      if (teacherSession.name && !teacherName) {
+        setTeacherName(teacherSession.name);
+      }
+    }
+  }, [teacherSession]);
+
+  // Adjust machines when selected lab changes
+  const handleLabChange = (newLabId: string) => {
+    setLabId(newLabId);
+    setConflictError(null);
+    const lab = labs.find((l) => l.id === newLabId);
+    if (lab) {
+      setRequestedMachines(lab.capacity);
+    }
+  };
+
+  const isMobileLab = selectedLab?.isMobile || false;
+  const isLabUnderMaintenance = Boolean(selectedLab?.isUnderMaintenance);
+  const hasLabBroadcastMessage = Boolean(selectedLab?.broadcastMessage?.trim());
+
+  // Helper to check conflict across dates
+  const prepareRecurrenceDates = () => {
+    const dates = generateRecurrenceDates(date, recurrenceFrequency, recurrenceCount, skipWeekends);
+    setCalculatedDates(dates);
+
+    const cleanLabel = scheduleLabel.trim();
+    const formattedTimeSlot = `${startTime} às ${endTime}${cleanLabel ? ` (${cleanLabel})` : ''}`;
+
+    const conflictsFound: { date: string; conflict: Booking }[] = [];
+    dates.forEach((d) => {
+      const conf = checkBookingConflict(existingBookings, labId, d, formattedTimeSlot, startTime, endTime);
+      if (conf) {
+        conflictsFound.push({ date: d, conflict: conf });
+      }
+    });
+
+    setRecurrenceConflicts(conflictsFound);
+    return { dates, conflictsFound, formattedTimeSlot };
+  };
+
+  const handleOpenRecurrenceConfirmation = () => {
+    // Basic validations first
+    if (!teacherName.trim()) {
+      setConflictError('Por favor informe o Nome do Professor(a).');
+      return;
+    }
+    const rawPhone = whatsapp.replace(/\D/g, '');
+    if (rawPhone.length < 10) {
+      setConflictError('Por favor informe um número de WhatsApp válido com DDD (mínimo 10 dígitos).');
+      return;
+    }
+    if (!classGroup.trim()) {
+      setConflictError('Por favor informe a Turma ou Ano.');
+      return;
+    }
+    if (isLabUnderMaintenance) {
+      setConflictError(
+        `O ${selectedLab.name} está temporariamente FECHADO PARA MANUTENÇÃO (${selectedLab.maintenanceReason || 'Em reparos técnicos'}). Não é possível realizar agendamentos no momento.`,
+      );
+      return;
+    }
+    if (isMobileLab && !roomNumber.trim()) {
+      setConflictError('Para Laboratórios Móveis, é obrigatório informar o Número da Sala.');
+      return;
+    }
+    if (!startTime || !endTime || startTime >= endTime) {
+      setConflictError('Verifique os horários de início e término.');
+      return;
+    }
+
+    setConflictError(null);
+    prepareRecurrenceDates();
+    setShowRecurrenceModal(true);
+  };
+
+  const executeRecurringBooking = async () => {
+    const { dates, conflictsFound, formattedTimeSlot } = prepareRecurrenceDates();
+
+    if (conflictsFound.length > 0) {
+      setConflictError(
+        `Não é possível confirmar a recorrência pois há conflito(s) em ${conflictsFound.length} data(s). Veja a lista e ajuste o horário ou período.`,
+      );
+      setShowRecurrenceModal(false);
+      return;
+    }
+
+    const startHour = parseInt(startTime.split(':')[0] || '7', 10);
+    const shift = startHour < 12 ? 'manha' : startHour < 18 ? 'tarde' : 'noite';
+
+    setSubmitting(true);
+    setShowRecurrenceModal(false);
+    try {
+      const createdList = await createRecurringBookings(
+        {
+          teacherName: teacherName.trim(),
+          whatsapp: whatsapp.trim(),
+          classGroup: classGroup.trim(),
+          subject: subject.trim() || undefined,
+          labId,
+          labName: selectedLab.name,
+          isMobileLab,
+          requestedMachines: Number(requestedMachines),
+          roomNumber: isMobileLab ? roomNumber.trim() : undefined,
+          timeSlot: formattedTimeSlot,
+          startTime,
+          endTime,
+          shift,
+          notes: notes.trim() || undefined,
+          recurrenceFrequency,
+          recurrenceTotalCount: dates.length,
+        },
+        dates,
+        recurrenceFrequency,
+      );
+
+      if (createdList.length > 0) {
+        playBookingSuccessSound();
+        setSuccessBooking(createdList[0]);
+        setRecurringSuccessCount(createdList.length);
+        onBookingCreated?.(createdList[0]);
+      }
+    } catch (e) {
+      console.error('Erro ao agendar com recorrência:', e);
+      setConflictError('Ocorreu um erro ao salvar o agendamento recorrente.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setConflictError(null);
+
+    // Validação de bloqueio por manutenção
+    if (isLabUnderMaintenance) {
+      setConflictError(
+        `O ${selectedLab.name} está temporariamente FECHADO PARA MANUTENÇÃO (${selectedLab.maintenanceReason || 'Em reparos técnicos'}). Por favor, escolha outro laboratório.`,
+      );
+      return;
+    }
+
+    // Se estiver com recorrência ativada, aciona o modal de confirmação com visualização de todas as datas
+    if (isRecurring && recurrenceFrequency !== 'none' && recurrenceCount > 1) {
+      handleOpenRecurrenceConfirmation();
+      return;
+    }
+
+    // Validações normais de agendamento único
+    if (!teacherName.trim()) {
+      setConflictError('Por favor informe o Nome do Professor(a).');
+      return;
+    }
+    if (!classGroup.trim()) {
+      setConflictError('Por favor informe a Turma ou Ano.');
+      return;
+    }
+
+    const rawPhone = whatsapp.replace(/\D/g, '');
+    if (rawPhone.length < 10) {
+      setConflictError('Por favor informe um número de WhatsApp válido com DDD (mínimo 10 dígitos).');
+      return;
+    }
+
+    const numMachines = Number(requestedMachines);
+    if (isNaN(numMachines) || numMachines <= 0) {
+      setConflictError('Por favor informe uma quantidade válida de máquinas a serem agendadas (mínimo 1).');
+      return;
+    }
+    if (numMachines > selectedLab.capacity) {
+      setConflictError(
+        `A quantidade informada (${numMachines} máquinas) excede a capacidade máxima do ${selectedLab.name} (${selectedLab.capacity} máquinas).`,
+      );
+      return;
+    }
+
+    if (isMobileLab && !roomNumber.trim()) {
+      setConflictError(
+        'Para os Laboratórios Móveis (carrinho de notebooks), é obrigatório informar o Número da Sala para a entrega!',
+      );
+      return;
+    }
+
+    if (!startTime || !endTime) {
+      setConflictError('Por favor informe os horários de início e término desejados para a aula.');
+      return;
+    }
+    if (startTime >= endTime) {
+      setConflictError('O horário de término da aula deve ser posterior ao horário de início.');
+      return;
+    }
+
+    const cleanLabel = scheduleLabel.trim();
+    const formattedTimeSlot = `${startTime} às ${endTime}${cleanLabel ? ` (${cleanLabel})` : ''}`;
+
+    const startHour = parseInt(startTime.split(':')[0] || '7', 10);
+    const shift = startHour < 12 ? 'manha' : startHour < 18 ? 'tarde' : 'noite';
+
+    const conflict = checkBookingConflict(
+      existingBookings,
+      labId,
+      date,
+      formattedTimeSlot,
+      startTime,
+      endTime,
+    );
+    if (conflict) {
+      setConflictError(
+        `O ${selectedLab.name} já está reservado no dia ${date} no horário "${conflict.timeSlot}" pelo professor(a) ${conflict.teacherName} (Turma: ${conflict.classGroup}). Escolha outro horário ou outro laboratório.`,
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const created = await createBooking({
+        teacherName: teacherName.trim(),
+        whatsapp: whatsapp.trim(),
+        classGroup: classGroup.trim(),
+        subject: subject.trim() || undefined,
+        labId,
+        labName: selectedLab.name,
+        isMobileLab,
+        requestedMachines: numMachines,
+        roomNumber: isMobileLab ? roomNumber.trim() : undefined,
+        date,
+        timeSlot: formattedTimeSlot,
+        startTime,
+        endTime,
+        shift,
+        notes: notes.trim() || undefined,
+      });
+
+      playBookingSuccessSound();
+      setSuccessBooking(created);
+      setRecurringSuccessCount(null);
+      onBookingCreated?.(created);
+      setNotes('');
+    } catch (err) {
+      console.error('Erro ao agendar:', err);
+      setConflictError('Ocorreu um erro ao gravar o agendamento. Tente novamente.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleNewBooking = () => {
+    setSuccessBooking(null);
+    setRecurringSuccessCount(null);
+    setConflictError(null);
+    setClassGroup('');
+    setSubject('');
+    setRoomNumber('');
+    setNotes('');
+    setIsRecurring(false);
+  };
+
+  if (successBooking) {
+    const assignedTechs = getTechniciansForLab(technicians, successBooking.labId);
+    const techsWithPhone = assignedTechs.filter((t) => t.phone && t.phone.trim().length >= 8);
+
+    return (
+      <div
+        id="booking-success-card"
+        className="w-full max-w-2xl mx-auto bg-white rounded-2xl border border-emerald-200 shadow-xl overflow-hidden p-6 sm:p-8 text-center animate-fade-in"
+      >
+        <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <CheckCircle2 className="w-10 h-10" />
+        </div>
+
+        <h3 className="text-2xl font-bold text-slate-900 mb-1">
+          {recurringSuccessCount
+            ? `Agendamento Recorrente Registrado (${recurringSuccessCount} aulas)!`
+            : 'Solicitação de Agendamento Enviada!'}
+        </h3>
+        <p className="text-sm text-slate-600 mb-4">
+          {recurringSuccessCount
+            ? `As ${recurringSuccessCount} datas foram agendadas no sistema e aguardam aprovação do técnico/administrador.`
+            : 'Seu pedido foi registrado no sistema escolar e está aguardando a confirmação do administrador.'}
+        </p>
+
+        {/* Confirmação de persistência no Firestore */}
+        <div className="flex items-center justify-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-medium mb-6">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>Gravado no banco de dados Firestore em tempo real (visível para a equipe de TI).</span>
+        </div>
+
+        {/* Resumo do Agendamento */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left text-sm space-y-2 mb-6">
+          <div className="flex justify-between border-b border-slate-200 pb-2">
+            <span className="text-slate-500">Laboratório:</span>
+            <span className="font-semibold text-slate-800">
+              {successBooking.labName}{' '}
+              {successBooking.requestedMachines
+                ? `(${successBooking.requestedMachines} máquinas solicitadas)`
+                : ''}
+            </span>
+          </div>
+          <div className="flex justify-between border-b border-slate-200 pb-2">
+            <span className="text-slate-500">Professor(a):</span>
+            <span className="font-semibold text-slate-800">{successBooking.teacherName}</span>
+          </div>
+          <div className="flex justify-between border-b border-slate-200 pb-2">
+            <span className="text-slate-500">WhatsApp:</span>
+            <span className="font-semibold text-slate-800">{successBooking.whatsapp}</span>
+          </div>
+          <div className="flex justify-between border-b border-slate-200 pb-2">
+            <span className="text-slate-500">Turma:</span>
+            <span className="font-semibold text-slate-800">{successBooking.classGroup}</span>
+          </div>
+          <div className="flex justify-between border-b border-slate-200 pb-2">
+            <span className="text-slate-500">
+              {recurringSuccessCount ? 'Primeira Data e Horário:' : 'Data e Horário:'}
+            </span>
+            <span className="font-semibold text-slate-800">
+              {successBooking.date} • {successBooking.timeSlot}
+            </span>
+          </div>
+          {recurringSuccessCount && (
+            <div className="flex justify-between border-b border-slate-200 pb-2 bg-blue-50/70 px-2 py-1 rounded-sm">
+              <span className="text-blue-800 font-medium">Recorrência:</span>
+              <span className="font-bold text-blue-900">
+                {recurringSuccessCount} aulas ({recurrenceFrequency === 'weekly' ? 'Semanal' : recurrenceFrequency === 'biweekly' ? 'Quinzenal' : 'Diária'})
+              </span>
+            </div>
+          )}
+          {successBooking.isMobileLab && (
+            <div className="flex justify-between border-b border-slate-200 pb-2 bg-amber-50 px-2 py-1 rounded-sm">
+              <span className="text-amber-800 font-medium">Entrega do Carrinho na Sala:</span>
+              <span className="font-bold text-amber-900">{successBooking.roomNumber}</span>
+            </div>
+          )}
+          <div className="flex justify-between pt-1">
+            <span className="text-slate-500">Status atual:</span>
+            <span className="inline-flex items-center gap-1 font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full text-xs border border-amber-200">
+              Aguardando Confirmação
+            </span>
+          </div>
+        </div>
+
+        {/* Card Especial: Notificação para o Técnico no WhatsApp */}
+        <div className="bg-emerald-50/70 border border-emerald-300 rounded-xl p-5 text-left mb-6 space-y-3">
+          <div className="flex items-center gap-2.5 pb-2 border-b border-emerald-200">
+            <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white shrink-0">
+              <Send className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="font-bold text-emerald-950 text-sm">Avisar Técnico / Suporte pelo WhatsApp</h4>
+              <p className="text-[11px] text-emerald-800">
+                Dispare uma mensagem instantânea para a equipe técnica agilizar a liberação da sala
+              </p>
+            </div>
+          </div>
+
+          {techsWithPhone.length > 0 ? (
+            <div className="space-y-2 pt-1">
+              <p className="text-xs font-semibold text-slate-700">Técnicos responsáveis por este laboratório:</p>
+              {techsWithPhone.map((tech) => {
+                const techMsg = generateTechnicianAlertWhatsAppMessage(successBooking, tech.name);
+                const waUrl = getWhatsAppSendUrl(tech.phone || '', techMsg);
+                return (
+                  <div
+                    key={tech.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-white border border-emerald-200 rounded-lg shadow-2xs"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800 text-sm">{tech.name}</span>
+                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-semibold">
+                          {tech.role === 'admin' ? 'Administrador' : 'Técnico de TI'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-emerald-700 font-mono font-medium mt-0.5">📱 {tech.phone}</p>
+                    </div>
+                    <a
+                      href={waUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Avisar {tech.name.split(' ')[0]} no WhatsApp</span>
+                      <ExternalLink className="w-3 h-3 opacity-75" />
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="space-y-2 pt-1">
+              <p className="text-xs text-slate-700">
+                Informe o WhatsApp do técnico de TI da sua escola para enviar os dados da reserva:
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="tel"
+                  placeholder="DDD + Número (ex: 11987654321)"
+                  value={customTechPhone}
+                  onChange={(e) => setCustomTechPhone(e.target.value)}
+                  className="flex-1 px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                />
+                <button
+                  type="button"
+                  disabled={!customTechPhone.trim()}
+                  onClick={() => {
+                    const techMsg = generateTechnicianAlertWhatsAppMessage(successBooking);
+                    const url = getWhatsAppSendUrl(customTechPhone, techMsg);
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Enviar para Técnico</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Opção de Copiar Mensagem de Aviso */}
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-emerald-200/70 text-xs">
+            <button
+              type="button"
+              onClick={async () => {
+                const techMsg = generateTechnicianAlertWhatsAppMessage(successBooking);
+                await navigator.clipboard.writeText(techMsg);
+                setCopiedTechMessage(true);
+                setTimeout(() => setCopiedTechMessage(false), 2500);
+              }}
+              className="inline-flex items-center gap-1.5 text-emerald-800 hover:text-emerald-950 font-medium py-1 px-2 rounded-md hover:bg-emerald-100/70 transition-colors cursor-pointer"
+            >
+              {copiedTechMessage ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-700" />
+                  <span className="text-emerald-900 font-bold">Mensagem copiada com sucesso!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 text-emerald-700" />
+                  <span>Copiar texto de notificação para colar em grupo ou conversa</span>
+                </>
+              )}
+            </button>
+            <span className="text-[11px] text-slate-500 flex items-center gap-1">
+              <Bell className="w-3 h-3 text-amber-500" />
+              Alerta em tempo real ativo no painel
+            </span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleNewBooking}
+          className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold rounded-xl transition-colors shadow-xs cursor-pointer"
+        >
+          Fazer Outro Agendamento
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-4xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Header Banner */}
+      <div className="px-6 py-5 bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-800 text-white">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
+            <Calendar className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white">Solicitar Agendamento de Laboratório</h2>
+            <p className="text-xs text-blue-100">
+              Preencha os dados da sua aula para reservar o laboratório ou carrinho móvel
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6">
+        {conflictError && (
+          <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm flex items-start gap-3 animate-fade-in">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-red-600 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-800">Atenção</p>
+              <p className="text-xs mt-0.5">{conflictError}</p>
+            </div>
+          </div>
+        )}
+
+        {/* 1. Seleção do Laboratório */}
+        <div>
+          <label className="block text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
+            <Monitor className="w-4 h-4 text-blue-600" />
+            <span>Selecione o Laboratório</span>
+            <span className="text-xs font-normal text-slate-600">(12 opções disponíveis)</span>
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+            {labs.map((lab) => {
+              const isSelected = lab.id === labId;
+              const isMaint = Boolean(lab.isUnderMaintenance);
+              return (
+                <button
+                  key={lab.id}
+                  type="button"
+                  id={`select-lab-${lab.id}`}
+                  onClick={() => handleLabChange(lab.id)}
+                  className={`p-3 rounded-xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
+                    isSelected
+                      ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-600/20 shadow-xs'
+                      : isMaint
+                        ? 'border-rose-200 bg-rose-50/40 hover:bg-rose-50/70'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="font-bold text-xs text-slate-900 truncate">{lab.name}</span>
+                    {isMaint ? (
+                      <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-rose-600 text-white shrink-0">
+                        Manutenção
+                      </span>
+                    ) : lab.isMobile ? (
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 shrink-0">
+                        Móvel
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-medium text-slate-600 shrink-0">Fixo</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
+                    <span>🖥️ {lab.capacity} máq.</span>
+                    {lab.broadcastMessage && (
+                      <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" title="Possui aviso especial" />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ALERTA DE MANUTENÇÃO (Se o lab selecionado estiver fechado) */}
+          {isLabUnderMaintenance && (
+            <div className="mt-3 p-4 bg-rose-50 border-2 border-rose-300 rounded-xl text-rose-900 flex items-start gap-3 animate-fade-in">
+              <Wrench className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-bold text-rose-800">
+                  {selectedLab.name} ESTÁ FECHADO PARA MANUTENÇÃO TÉCNICA
+                </h4>
+                <p className="text-xs text-rose-700 mt-1">
+                  <strong>Motivo:</strong> {selectedLab.maintenanceReason || 'Em reparos técnicos agendados.'}
+                </p>
+                <p className="text-[11px] text-rose-600 mt-1">
+                  Não é permitido realizar reservas para este espaço enquanto estiver interditado. Por gentileza, selecione outro laboratório da lista.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* MENSAGEM / AVISO DO LABORATÓRIO PARA O PROFESSOR */}
+          {hasLabBroadcastMessage && (
+            <div className="mt-3 p-4 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 flex items-start gap-3 animate-fade-in shadow-2xs">
+              <Bell className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-amber-900 bg-amber-200/80 px-2 py-0.5 rounded-sm">
+                    Aviso do Laboratório ({selectedLab.name})
+                  </span>
+                </div>
+                <p className="text-xs text-amber-900 mt-1.5 font-medium leading-relaxed">
+                  {selectedLab.broadcastMessage}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Destaque do Laboratório Selecionado com Softwares Disponíveis */}
+          <div
+            className={`mt-3 p-3.5 rounded-xl border text-xs space-y-2 ${
+              selectedLab.isMobile
+                ? 'bg-rose-50/80 border-rose-200 text-rose-950'
+                : 'bg-slate-50 border-slate-200 text-slate-800'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {selectedLab.isMobile ? (
+                  <Truck className="w-4 h-4 text-rose-600 shrink-0" />
+                ) : (
+                  <Monitor className="w-4 h-4 text-blue-600 shrink-0" />
+                )}
+                <span>
+                  <strong>{selectedLab.name}</strong>: {selectedLab.description} (Capacidade total:{' '}
+                  {selectedLab.capacity} computadores)
+                </span>
+              </div>
+              {selectedLab.isMobile && (
+                <span className="font-semibold text-rose-700 shrink-0 bg-rose-100 px-2 py-0.5 rounded-md text-[11px]">
+                  Requer indicação de sala!
+                </span>
+              )}
+            </div>
+
+            {/* Softwares Disponíveis neste Lab */}
+            <div className="pt-2 border-t border-slate-200/60 flex items-start gap-2">
+              <div className="flex items-center gap-1 font-bold text-[11px] text-slate-700 shrink-0 mt-0.5">
+                <Code className="w-3.5 h-3.5 text-blue-600" />
+                <span>Softwares disponíveis:</span>
+              </div>
+              <div className="flex flex-wrap gap-1 flex-1">
+                {selectedLab.softwares && selectedLab.softwares.length > 0 ? (
+                  selectedLab.softwares.map((sw) => (
+                    <span
+                      key={sw}
+                      className="px-2 py-0.5 text-[10px] font-semibold bg-white border border-slate-200 text-slate-700 rounded-md shadow-2xs"
+                    >
+                      {sw}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-[10px] text-slate-500 italic">
+                    Nenhum software específico cadastrado ainda.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Campo de Quantidade de Máquinas Desejadas */}
+          <div className="mt-3 p-3.5 bg-blue-50/60 border border-blue-200 rounded-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <label
+                  htmlFor="requested-machines-input"
+                  className="block text-xs font-bold text-blue-950 flex items-center gap-1.5"
+                >
+                  <Laptop className="w-4 h-4 text-blue-700" />
+                  <span>Quantas máquinas você vai querer agendar? *</span>
+                </label>
+                <p className="text-[11px] text-blue-800 mt-0.5">
+                  Informe o número exato de computadores/notebooks que sua turma irá utilizar neste laboratório (Máx: {selectedLab.capacity}).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  id="requested-machines-input"
+                  type="number"
+                  min={1}
+                  max={selectedLab.capacity}
+                  value={requestedMachines}
+                  onChange={(e) => setRequestedMachines(Number(e.target.value))}
+                  className="w-24 px-3 py-1.5 text-sm font-bold text-center bg-white border border-blue-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 text-slate-900"
+                />
+                <span className="text-xs text-slate-600 font-semibold">de {selectedLab.capacity}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Caso seja Lab Móvel, exigir número da sala */}
+          {isMobileLab && (
+            <div className="mt-3 p-4 bg-amber-50 border border-amber-300 rounded-xl animate-fade-in">
+              <label
+                htmlFor="room-number-input"
+                className="block text-xs font-bold text-amber-900 mb-1 flex items-center gap-1.5"
+              >
+                <MapPin className="w-4 h-4 text-amber-700" />
+                <span>Número / Nome da Sala para Entrega do Carrinho Móvel *</span>
+              </label>
+              <p className="text-[11px] text-amber-800 mb-2">
+                O carrinho de notebooks precisa ser transportado pelos técnicos até a sua sala de aula.
+              </p>
+              <input
+                id="room-number-input"
+                type="text"
+                required
+                placeholder="Ex: Sala 204 - Bloco B, Auditório 1, Sala de Artes..."
+                value={roomNumber}
+                onChange={(e) => setRoomNumber(e.target.value)}
+                className="w-full px-3.5 py-2 text-sm bg-white border border-amber-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-medium"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* 2. Dados do Professor e Contato */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label
+              htmlFor="teacher-name-input"
+              className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
+            >
+              <User className="w-3.5 h-3.5 text-slate-500" />
+              <span>Nome Completo do Professor(a) *</span>
+            </label>
+            <input
+              id="teacher-name-input"
+              type="text"
+              required
+              placeholder="Ex: Prof. Carlos Eduardo Silva"
+              value={teacherName}
+              onChange={(e) => setTeacherName(e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="whatsapp-input"
+              className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
+            >
+              <Phone className="w-3.5 h-3.5 text-emerald-600" />
+              <span>WhatsApp do Professor (com DDD) *</span>
+            </label>
+            <input
+              id="whatsapp-input"
+              type="tel"
+              required
+              placeholder="(11) 98765-4321"
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+            />
+            <p className="text-[11px] text-slate-600 mt-1">
+              Você receberá a confirmação da sua reserva por este número.
+            </p>
+          </div>
+        </div>
+
+        {/* 3. Turma e Assunto */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label
+              htmlFor="class-group-input"
+              className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
+            >
+              <Users className="w-3.5 h-3.5 text-slate-500" />
+              <span>Turma / Série / Grupo *</span>
+            </label>
+            <input
+              id="class-group-input"
+              type="text"
+              required
+              placeholder="Ex: 9º Ano A, 3º Ensino Médio B, Turma de Informática..."
+              value={classGroup}
+              onChange={(e) => setClassGroup(e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="subject-input"
+              className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-slate-500" />
+              <span>Disciplina / Assunto (opcional)</span>
+            </label>
+            <input
+              id="subject-input"
+              type="text"
+              placeholder="Ex: Robótica, Pesquisa de História, Redação..."
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+            />
+          </div>
+        </div>
+
+        {/* 4. Data e Horários Inseridos pelo Professor */}
+        <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-600" />
+              <span className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                Data e Horários da Aula
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-500">
+              Personalize o horário exato da sua aula
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Data Inicial */}
+            <div>
+              <label
+                htmlFor="booking-date-input"
+                className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
+              >
+                <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                <span>{isRecurring ? 'Data da 1ª Aula *' : 'Data da Reserva *'}</span>
+              </label>
+              <input
+                id="booking-date-input"
+                type="date"
+                required
+                min={new Date().toISOString().split('T')[0]}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600 font-medium"
+              />
+            </div>
+
+            {/* Horário de Início */}
+            <div>
+              <label
+                htmlFor="booking-start-time"
+                className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
+              >
+                <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Horário de Início *</span>
+              </label>
+              <input
+                id="booking-start-time"
+                type="time"
+                required
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600 font-mono text-slate-900"
+              />
+            </div>
+
+            {/* Horário de Término */}
+            <div>
+              <label
+                htmlFor="booking-end-time"
+                className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
+              >
+                <Clock className="w-3.5 h-3.5 text-rose-600" />
+                <span>Horário de Término *</span>
+              </label>
+              <input
+                id="booking-end-time"
+                type="time"
+                required
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600 font-mono text-slate-900"
+              />
+            </div>
+          </div>
+
+          {/* Rótulo / Turno */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <label
+                htmlFor="booking-schedule-label"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Identificação / Aulas (Opcional)
+              </label>
+              <input
+                id="booking-schedule-label"
+                type="text"
+                placeholder="Ex: 1ª e 2ª Aula, Aula Prática, Projeto Integrador..."
+                value={scheduleLabel}
+                onChange={(e) => setScheduleLabel(e.target.value)}
+                className="w-full px-3.5 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+            <div className="sm:self-end">
+              <div className="bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs flex items-center gap-2">
+                <span className="text-slate-500 font-medium">Horário Final:</span>
+                <span className="font-bold text-blue-700 font-mono">
+                  {startTime} às {endTime}
+                </span>
+                {scheduleLabel && (
+                  <span className="text-slate-600">({scheduleLabel})</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 5. AGENDAMENTO COM RECORRÊNCIA (Repetição de aulas com confirmação) */}
+        <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                <Repeat className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-900">
+                  Agendamento com Recorrência
+                </h4>
+                <p className="text-[11px] text-slate-600">
+                  Repita esta aula semanalmente, quinzenalmente ou diariamente com etapa de confirmação prévia
+                </p>
+              </div>
+            </div>
+
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isRecurring}
+                onChange={(e) => setIsRecurring(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-hidden peer-focus:ring-2 peer-focus:ring-indigo-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
+          </div>
+
+          {isRecurring && (
+            <div className="pt-3 border-t border-indigo-200/60 grid grid-cols-1 sm:grid-cols-3 gap-3 animate-fade-in">
+              <div>
+                <label className="block text-xs font-semibold text-indigo-950 mb-1">
+                  Frequência da Repetição:
+                </label>
+                <select
+                  value={recurrenceFrequency}
+                  onChange={(e) => setRecurrenceFrequency(e.target.value as RecurrenceType)}
+                  className="w-full px-3 py-2 text-xs bg-white border border-indigo-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-600 font-medium"
+                >
+                  <option value="weekly">Semanal (mesmo dia da semana)</option>
+                  <option value="biweekly">Quinzenal (a cada 2 semanas)</option>
+                  <option value="daily">Diária (dias úteis seg-sex)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-indigo-950 mb-1">
+                  Quantidade de Aulas / Ocorrências:
+                </label>
+                <select
+                  value={recurrenceCount}
+                  onChange={(e) => setRecurrenceCount(Number(e.target.value))}
+                  className="w-full px-3 py-2 text-xs bg-white border border-indigo-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-600 font-medium"
+                >
+                  <option value={2}>2 aulas</option>
+                  <option value={3}>3 aulas</option>
+                  <option value={4}>4 aulas (1 mês aprox.)</option>
+                  <option value={6}>6 aulas</option>
+                  <option value={8}>8 aulas (2 meses aprox.)</option>
+                  <option value={12}>12 aulas (1 trimestre)</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col justify-end">
+                <button
+                  type="button"
+                  onClick={handleOpenRecurrenceConfirmation}
+                  className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                >
+                  <CalendarDays className="w-3.5 h-3.5" />
+                  <span>Verificar & Confirmar Datas</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 6. Observações */}
+        <div>
+          <label
+            htmlFor="booking-notes-input"
+            className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
+          >
+            <FileText className="w-3.5 h-3.5 text-slate-500" />
+            <span>Observações ou necessidades especiais (opcional)</span>
+          </label>
+          <textarea
+            id="booking-notes-input"
+            rows={2}
+            placeholder="Observações ou necessidades especiais para a sua aula..."
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600 resize-none"
+          />
+        </div>
+
+        {/* Botão de Envio */}
+        <div className="pt-2">
+          <button
+            id="submit-booking-btn"
+            type="submit"
+            disabled={submitting || isLabUnderMaintenance}
+            className={`w-full py-3.5 px-6 text-sm font-bold text-white rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              isLabUnderMaintenance
+                ? 'bg-slate-400 cursor-not-allowed opacity-60'
+                : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
+            }`}
+          >
+            {isRecurring ? <Repeat className="w-4 h-4" /> : <Calendar className="w-4 h-4" />}
+            <span>
+              {submitting
+                ? 'Processando Agendamento...'
+                : isLabUnderMaintenance
+                  ? 'Laboratório em Manutenção (Indisponível)'
+                  : isRecurring
+                    ? `Confirmar Agendamento Recorrente (${recurrenceCount} aulas)`
+                    : 'Confirmar e Solicitar Agendamento'}
+            </span>
+          </button>
+          <p className="text-center text-[11px] text-slate-600 mt-2">
+            Os dados serão salvos no banco de dados Firebase. O administrador revisará e enviará a confirmação por WhatsApp.
+          </p>
+        </div>
+      </form>
+
+      {/* MODAL DE CONFIRMAÇÃO DE RECORRÊNCIA */}
+      {showRecurrenceModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-scale-in">
+            <div className="p-5 bg-indigo-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Repeat className="w-5 h-5 text-white" />
+                <div>
+                  <h3 className="text-base font-bold">Confirmação de Agendamento com Recorrência</h3>
+                  <p className="text-xs text-indigo-100">
+                    Confira todas as datas e horários antes de enviar a solicitação
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRecurrenceModal(false)}
+                className="text-white/80 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Laboratório:</span>
+                  <span className="font-bold text-slate-900">{selectedLab.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Professor(a):</span>
+                  <span className="font-bold text-slate-900">{teacherName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Turma:</span>
+                  <span className="font-bold text-slate-900">{classGroup}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Horário:</span>
+                  <span className="font-bold text-blue-700 font-mono">
+                    {startTime} às {endTime}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Frequência:</span>
+                  <span className="font-bold text-indigo-700">
+                    {recurrenceFrequency === 'weekly'
+                      ? 'Semanal'
+                      : recurrenceFrequency === 'biweekly'
+                        ? 'Quinzenal'
+                        : 'Diária'} ({calculatedDates.length} ocorrências)
+                  </span>
+                </div>
+              </div>
+
+              {recurrenceConflicts.length > 0 && (
+                <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold text-rose-800">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    <span>Conflitos detectados ({recurrenceConflicts.length}):</span>
+                  </div>
+                  <ul className="space-y-1 list-disc list-inside">
+                    {recurrenceConflicts.map(({ date: d, conflict: c }) => (
+                      <li key={d}>
+                        Data <strong>{d}</strong>: já reservado por {c.teacherName} ({c.classGroup}) às {c.timeSlot}.
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="font-medium text-[11px] text-rose-700">
+                    Para prosseguir, ajuste o horário ou selecione outro laboratório.
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <span className="text-xs font-bold text-slate-800 block mb-2">
+                  Datas que serão agendadas ({calculatedDates.length}):
+                </span>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {calculatedDates.map((d, idx) => {
+                    const hasConflict = recurrenceConflicts.some((c) => c.date === d);
+                    const [y, m, day] = d.split('-');
+                    const dateObj = new Date(Number(y), Number(m) - 1, Number(day));
+                    const weekday = dateObj.toLocaleDateString('pt-BR', { weekday: 'short' });
+
+                    return (
+                      <div
+                        key={d}
+                        className={`px-3 py-2 rounded-lg border text-xs flex items-center justify-between ${
+                          hasConflict
+                            ? 'bg-rose-50 border-rose-300 text-rose-900 font-semibold'
+                            : 'bg-white border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold flex items-center justify-center">
+                            {idx + 1}
+                          </span>
+                          <span className="capitalize">{weekday}, {d}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[11px] text-slate-600">
+                            {startTime} - {endTime}
+                          </span>
+                          {hasConflict ? (
+                            <span className="text-[10px] bg-rose-600 text-white px-1.5 py-0.5 rounded-sm font-bold">
+                              Conflito
+                            </span>
+                          ) : (
+                            <Check className="w-4 h-4 text-emerald-600" />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowRecurrenceModal(false)}
+                className="px-4 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer"
+              >
+                Voltar e Editar
+              </button>
+              <button
+                type="button"
+                disabled={submitting || recurrenceConflicts.length > 0}
+                onClick={executeRecurringBooking}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Confirmar Todos os Agendamentos</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

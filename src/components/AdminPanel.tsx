@@ -1,0 +1,946 @@
+import React, { useState } from 'react';
+import { Booking, LAB_LIST, BookingStatus, TIME_SLOTS } from '../types';
+import { formatDateBR, sanitizeWhatsAppPhone } from '../lib/whatsapp';
+import {
+  updateBookingStatus,
+  deleteBooking,
+  markWhatsAppAsSent,
+  clearAllBookings,
+} from '../lib/bookingService';
+import {
+  Shield,
+  MessageSquare,
+  CheckCircle,
+  XCircle,
+  Trash2,
+  Filter,
+  Search,
+  Calendar,
+  Truck,
+  Monitor,
+  Phone,
+  Clock,
+  AlertCircle,
+  FileSpreadsheet,
+  Printer,
+  ChevronDown,
+  Users,
+  CalendarDays,
+  RefreshCw,
+  Code,
+  Repeat,
+} from 'lucide-react';
+import { WhatsAppModal } from './WhatsAppModal';
+import { TechnicianManagement } from './TechnicianManagement';
+import { BookingCalendar } from './BookingCalendar';
+import { ClearDataModal } from './ClearDataModal';
+import { LabManagementPanel } from './LabManagementPanel';
+import { AdminSecurityPanel } from './AdminSecurityPanel';
+import { useAuth } from '../lib/authContext';
+import { Lab } from '../types';
+import { playBookingConfirmedSound } from '../lib/soundUtils';
+
+interface AdminPanelProps {
+  bookings: Booking[];
+  labs?: Lab[];
+}
+
+export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIST }) => {
+  const { isSuperAdmin, user } = useAuth();
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const [activeTab, setActiveTab] = useState<
+    'all' | 'pending' | 'calendar' | 'mobile_route' | 'schedule' | 'technicians' | 'softwares' | 'security'
+  >('pending');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLabId, setSelectedLabId] = useState<string>('all');
+  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [isClearing, setIsClearing] = useState(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+
+  // WhatsApp Modal State
+  const [activeWhatsAppBooking, setActiveWhatsAppBooking] = useState<Booking | null>(null);
+  const [isWhatsAppOpen, setIsWhatsAppOpen] = useState(false);
+
+  // Stats
+  const pendingCount = bookings.filter((b) => b.status === 'pending').length;
+  const confirmedCount = bookings.filter((b) => b.status === 'confirmed').length;
+  const todayBookingsCount = bookings.filter((b) => b.date === todayStr).length;
+  const mobileBookingsCount = bookings.filter((b) => b.isMobileLab && b.status !== 'cancelled').length;
+  const whatsAppSentCount = bookings.filter((b) => b.whatsappSent).length;
+
+  // Escopo de laboratórios do técnico (se aplicável)
+  const userAssignedLabs =
+    user?.role === 'technician' && user.assignedLabIds && user.assignedLabIds.length > 0
+      ? user.assignedLabIds
+      : null;
+
+  // Filtragem
+  const filteredBookings = bookings.filter((b) => {
+    // Se o técnico tem laboratórios específicos vinculados e está no modo "all", restringe aos seus laboratórios
+    if (userAssignedLabs && selectedLabId === 'all') {
+      if (!userAssignedLabs.includes(b.labId)) return false;
+    }
+
+    // Tab filtering
+    if (activeTab === 'pending' && b.status !== 'pending') return false;
+    if (activeTab === 'mobile_route' && !b.isMobileLab) return false;
+
+    // Filters
+    if (selectedStatus !== 'all' && b.status !== selectedStatus) return false;
+    if (selectedLabId !== 'all' && b.labId !== selectedLabId) return false;
+    if (selectedDate && b.date !== selectedDate) return false;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const phoneDigits = searchQuery.replace(/\D/g, '');
+      const matchName = b.teacherName.toLowerCase().includes(q);
+      const matchClass = b.classGroup.toLowerCase().includes(q);
+      const matchLab = b.labName.toLowerCase().includes(q);
+      const matchRoom = b.roomNumber?.toLowerCase().includes(q) || false;
+      const matchPhone = phoneDigits ? b.whatsapp.replace(/\D/g, '').includes(phoneDigits) : false;
+      return matchName || matchClass || matchLab || matchRoom || matchPhone;
+    }
+
+    return true;
+  });
+
+  const handleOpenWhatsAppModal = (booking: Booking) => {
+    setActiveWhatsAppBooking(booking);
+    setIsWhatsAppOpen(true);
+  };
+
+  const handleConfirmAndSendWhatsApp = async (bookingId: string, customNote?: string) => {
+    await updateBookingStatus(bookingId, 'confirmed', customNote);
+    await markWhatsAppAsSent(bookingId);
+    playBookingConfirmedSound();
+  };
+
+  const handleStatusChange = async (bookingId: string, status: BookingStatus) => {
+    try {
+      await updateBookingStatus(bookingId, status);
+      if (status === 'confirmed') {
+        playBookingConfirmedSound();
+      }
+    } catch (err) {
+      console.error('Erro ao atualizar status:', err);
+    }
+  };
+
+  const handleDelete = async (bookingId: string) => {
+    if (window.confirm('Tem certeza de que deseja excluir este agendamento do histórico?')) {
+      try {
+        await deleteBooking(bookingId);
+      } catch (err) {
+        console.error('Erro ao excluir:', err);
+      }
+    }
+  };
+
+  const handleClearAllBookings = async () => {
+    setIsClearing(true);
+    try {
+      await clearAllBookings();
+    } catch (err) {
+      console.error('Erro ao limpar agendamentos:', err);
+      throw err;
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Clear Data Math Confirmation Modal */}
+      <ClearDataModal
+        isOpen={isClearModalOpen}
+        onClose={() => setIsClearModalOpen(false)}
+        onConfirm={handleClearAllBookings}
+        isLoading={isClearing}
+      />
+
+      {/* WhatsApp Modal */}
+      <WhatsAppModal
+        booking={activeWhatsAppBooking}
+        isOpen={isWhatsAppOpen}
+        onClose={() => {
+          setIsWhatsAppOpen(false);
+          setActiveWhatsAppBooking(null);
+        }}
+        onConfirmAndSend={handleConfirmAndSendWhatsApp}
+      />
+
+      {/* Top Banner with Admin User info & Quick Tools */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
+            <Shield className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-slate-900">
+                Painel Administrativo & Gestão Escolar
+              </h2>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                {isSuperAdmin ? 'Admin Geral (guilherme.benz)' : 'Técnico Autorizado'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Gerencie reservas dos 12 laboratórios, confirme horários e cadastre a equipe técnica
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-center">
+          <button
+            id="admin-clear-bookings-btn"
+            type="button"
+            disabled={isClearing}
+            onClick={() => setIsClearModalOpen(true)}
+            title="Limpa agendamentos de teste do banco"
+            className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isClearing ? 'animate-spin' : ''}`} />
+            <span>{isClearing ? 'Limpando...' : 'Limpar Agendamentos'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+        <div
+          onClick={() => setActiveTab('pending')}
+          className={`p-4 rounded-xl border cursor-pointer transition-all ${
+            activeTab === 'pending'
+              ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/20 shadow-xs'
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700">Pendentes</span>
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+          </div>
+          <p className="text-2xl font-bold text-amber-700 mt-1">{pendingCount}</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">Aguardando aprovação</p>
+        </div>
+
+        <div
+          onClick={() => setActiveTab('all')}
+          className={`p-4 rounded-xl border cursor-pointer transition-all ${
+            activeTab === 'all'
+              ? 'bg-blue-500/10 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <span className="text-xs font-semibold text-slate-700">Confirmados</span>
+          <p className="text-2xl font-bold text-emerald-700 mt-1">{confirmedCount}</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">Aprovados no sistema</p>
+        </div>
+
+        <div
+          onClick={() => {
+            setActiveTab('all');
+            setSelectedDate(todayStr);
+          }}
+          className="bg-white p-4 rounded-xl border border-slate-200 cursor-pointer hover:border-slate-300 transition-all"
+        >
+          <span className="text-xs font-semibold text-slate-700">Aulas Hoje</span>
+          <p className="text-2xl font-bold text-slate-900 mt-1">{todayBookingsCount}</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">{todayStr}</p>
+        </div>
+
+        <div
+          onClick={() => setActiveTab('mobile_route')}
+          className={`p-4 rounded-xl border cursor-pointer transition-all ${
+            activeTab === 'mobile_route'
+              ? 'bg-rose-500/10 border-rose-500 ring-2 ring-rose-500/20 shadow-xs'
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700">Labs Móveis</span>
+            <Truck className="w-3.5 h-3.5 text-rose-600" />
+          </div>
+          <p className="text-2xl font-bold text-rose-700 mt-1">{mobileBookingsCount}</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">Entregas em sala</p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 col-span-2 lg:col-span-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700">WhatsApp Enviados</span>
+            <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+          </div>
+          <p className="text-2xl font-bold text-emerald-700 mt-1">{whatsAppSentCount}</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">Mensagens disparadas</p>
+        </div>
+      </div>
+
+      {/* Tabs Navigation */}
+      <div className="flex border-b border-slate-200 gap-2 overflow-x-auto pb-px">
+        <button
+          id="tab-pending-btn"
+          onClick={() => setActiveTab('pending')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'pending'
+              ? 'border-blue-600 text-blue-700'
+              : 'border-transparent text-slate-700 hover:text-slate-900'
+          }`}
+        >
+          <span>Aguardando Aprovação</span>
+          {pendingCount > 0 && (
+            <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-800 rounded-full font-bold">
+              {pendingCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          id="tab-all-btn"
+          onClick={() => setActiveTab('all')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'all'
+              ? 'border-blue-600 text-blue-700'
+              : 'border-transparent text-slate-700 hover:text-slate-900'
+          }`}
+        >
+          <span>Todos os Agendamentos</span>
+          <span className="text-xs text-slate-600">({bookings.length})</span>
+        </button>
+
+        <button
+          id="tab-calendar-btn"
+          onClick={() => setActiveTab('calendar')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'calendar'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-slate-700 hover:text-slate-900'
+          }`}
+        >
+          <CalendarDays className="w-4 h-4 text-indigo-600" />
+          <span>Calendário (Dia / Semana / Mês)</span>
+        </button>
+
+        <button
+          id="tab-mobile-route-btn"
+          onClick={() => setActiveTab('mobile_route')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'mobile_route'
+              ? 'border-rose-600 text-rose-700'
+              : 'border-transparent text-slate-700 hover:text-slate-900'
+          }`}
+        >
+          <Truck className="w-4 h-4 text-rose-600" />
+          <span>Roteiro de Carrinhos Móveis (Salas)</span>
+          <span className="px-2 py-0.5 text-xs bg-rose-100 text-rose-800 rounded-full font-bold">
+            {mobileBookingsCount}
+          </span>
+        </button>
+
+        <button
+          id="tab-schedule-matrix-btn"
+          onClick={() => setActiveTab('schedule')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'schedule'
+              ? 'border-blue-600 text-blue-700'
+              : 'border-transparent text-slate-700 hover:text-slate-900'
+          }`}
+        >
+          <Calendar className="w-4 h-4 text-blue-600" />
+          <span>Grade Diária (12 Labs)</span>
+        </button>
+
+        <button
+          id="tab-technicians-btn"
+          onClick={() => setActiveTab('technicians')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'technicians'
+              ? 'border-blue-600 text-blue-700'
+              : 'border-transparent text-slate-700 hover:text-slate-900'
+          }`}
+        >
+          <Users className="w-4 h-4 text-blue-600" />
+          <span>Equipe de Técnicos</span>
+        </button>
+
+        <button
+          id="tab-softwares-btn"
+          onClick={() => setActiveTab('softwares')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'softwares'
+              ? 'border-blue-600 text-blue-700'
+              : 'border-transparent text-slate-700 hover:text-slate-900'
+          }`}
+        >
+          <Code className="w-4 h-4 text-blue-600" />
+          <span>Labs: Manutenção & Softwares</span>
+        </button>
+
+        <button
+          id="tab-security-btn"
+          onClick={() => setActiveTab('security')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'security'
+              ? 'border-emerald-600 text-emerald-700'
+              : 'border-transparent text-slate-700 hover:text-slate-900'
+          }`}
+        >
+          <Shield className="w-4 h-4 text-emerald-600" />
+          <span>Segurança & Senha</span>
+        </button>
+      </div>
+
+      {/* Main Content Area */}
+      {activeTab === 'security' ? (
+        <AdminSecurityPanel />
+      ) : activeTab === 'softwares' ? (
+        <LabManagementPanel labs={labs} />
+      ) : activeTab === 'technicians' ? (
+        <TechnicianManagement labs={labs} />
+      ) : activeTab === 'calendar' ? (
+        <BookingCalendar
+          bookings={bookings}
+          onSelectBooking={(b) => handleOpenWhatsAppModal(b)}
+        />
+      ) : activeTab === 'schedule' ? (
+        <ScheduleMatrixView bookings={bookings} onOpenWhatsApp={handleOpenWhatsAppModal} />
+      ) : (
+        <div className="space-y-4">
+          {/* Barra de Foco do Técnico: Opção de qual laboratório visualizar */}
+          {user?.role === 'technician' && (
+            <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border border-blue-200 rounded-2xl p-4 shadow-xs">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                        Painel do Técnico
+                      </span>
+                      <span className="text-sm font-bold text-slate-900">{user.name}</span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      {userAssignedLabs
+                        ? `Você está designado para ${userAssignedLabs.length} laboratório(s). Escolha qual deseja visualizar:`
+                        : 'Você possui permissão para visualizar todos os 12 laboratórios da escola:'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                  <span className="text-xs font-bold text-slate-700 whitespace-nowrap">
+                    Visualizar Lab:
+                  </span>
+                  <select
+                    id="technician-lab-view-select"
+                    value={selectedLabId}
+                    onChange={(e) => setSelectedLabId(e.target.value)}
+                    className="w-full md:w-auto px-3 py-2 text-xs font-bold bg-white text-blue-900 border border-blue-300 rounded-xl shadow-xs focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="all">
+                      {userAssignedLabs
+                        ? `★ Todos os Meus Labs Vinculados (${userAssignedLabs.length})`
+                        : '★ Todos os Laboratórios (12)'}
+                    </option>
+                    {(userAssignedLabs
+                      ? labs.filter((l) => userAssignedLabs.includes(l.id))
+                      : labs
+                    ).map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} {l.isMobile ? '(Carrinho Móvel - Sala)' : `(${l.capacity} máq)`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Botões de Atalho Rápido para o Técnico Alternar de Lab */}
+              <div className="mt-3 pt-3 border-t border-blue-200/60 flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                <span className="text-[11px] font-semibold text-slate-500 shrink-0">Atalhos rápidos:</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLabId('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-colors cursor-pointer ${
+                    selectedLabId === 'all'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-blue-200 hover:bg-blue-100'
+                  }`}
+                >
+                  {userAssignedLabs ? `Meus Labs (${userAssignedLabs.length})` : 'Todos (12)'}
+                </button>
+                {(userAssignedLabs
+                  ? labs.filter((l) => userAssignedLabs.includes(l.id))
+                  : labs
+                ).map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => setSelectedLabId(l.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-colors flex items-center gap-1 cursor-pointer ${
+                      selectedLabId === l.id
+                        ? 'bg-blue-600 text-white shadow-xs font-bold'
+                        : 'bg-white text-slate-700 border border-blue-200 hover:bg-blue-100'
+                    }`}
+                  >
+                    {l.isMobile ? (
+                      <Truck className="w-3 h-3 text-rose-500" />
+                    ) : (
+                      <Monitor className="w-3 h-3 text-blue-500" />
+                    )}
+                    <span>{l.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Filters Bar */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[240px]">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <input
+                id="admin-search-bookings"
+                type="text"
+                placeholder="Buscar professor, turma, sala, whatsapp..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+
+            {/* Filter by Lab */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-700 font-medium">Lab:</span>
+              <select
+                id="admin-filter-lab"
+                value={selectedLabId}
+                onChange={(e) => setSelectedLabId(e.target.value)}
+                className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+              >
+                <option value="all">
+                  {userAssignedLabs ? `Meus Labs Atribuídos (${userAssignedLabs.length})` : 'Todos os Labs (12)'}
+                </option>
+                <optgroup label="Laboratórios Fixos">
+                  {(userAssignedLabs
+                    ? labs.filter((l) => !l.isMobile && userAssignedLabs.includes(l.id))
+                    : labs.filter((l) => !l.isMobile)
+                  ).map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} ({l.capacity} máq)
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Laboratórios Móveis">
+                  {(userAssignedLabs
+                    ? labs.filter((l) => l.isMobile && userAssignedLabs.includes(l.id))
+                    : labs.filter((l) => l.isMobile)
+                  ).map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} ({l.capacity} máq)
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+
+            {/* Filter by Date */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-700 font-medium">Data:</span>
+              <input
+                id="admin-filter-date"
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="px-2 py-1 text-xs border border-slate-300 rounded-lg"
+              />
+              {selectedDate && (
+                <button
+                  onClick={() => setSelectedDate('')}
+                  className="text-[11px] text-slate-500 hover:text-red-600"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+
+            {/* Filter by Status */}
+            {activeTab === 'all' && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-700 font-medium">Status:</span>
+                <select
+                  id="admin-filter-status"
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="all">Todos os Status</option>
+                  <option value="pending">Pendente</option>
+                  <option value="confirmed">Confirmado</option>
+                  <option value="rejected">Recusado</option>
+                  <option value="cancelled">Cancelado</option>
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* Roteiro Móvel Warning Banner if in mobile route tab */}
+          {activeTab === 'mobile_route' && (
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-rose-900">
+                    Roteiro de Entrega dos Laboratórios Móveis
+                  </h3>
+                  <p className="text-xs text-rose-800 mt-0.5">
+                    Utilize esta lista para instruir a equipe de apoio e portaria sobre qual carrinho
+                    levar para cada sala em cada aula.
+                  </p>
+                </div>
+              </div>
+              <button
+                id="print-mobile-route-btn"
+                onClick={() => window.print()}
+                className="px-3.5 py-2 bg-white border border-rose-300 hover:bg-rose-100 text-rose-800 text-xs font-semibold rounded-lg flex items-center gap-1.5 shrink-0 shadow-2xs"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Imprimir Roteiro</span>
+              </button>
+            </div>
+          )}
+
+          {/* Table / List of Bookings */}
+          {filteredBookings.length === 0 ? (
+            <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500">
+              <Clock className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="font-semibold text-slate-700 text-sm">
+                Nenhum agendamento com estes filtros
+              </p>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Altere os filtros acima para visualizar outros agendamentos.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 uppercase font-bold text-[11px]">
+                    <tr>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Professor & WhatsApp</th>
+                      <th className="py-3 px-4">Laboratório & Turma</th>
+                      <th className="py-3 px-4">Data & Horário</th>
+                      {activeTab === 'mobile_route' ? (
+                        <th className="py-3 px-4 text-rose-700 font-extrabold bg-rose-50/50">
+                          🚚 Sala de Entrega
+                        </th>
+                      ) : (
+                        <th className="py-3 px-4">Local / Sala</th>
+                      )}
+                      <th className="py-3 px-4 text-right">Ações & Confirmação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredBookings.map((b) => {
+                      const isPending = b.status === 'pending';
+                      const isConfirmed = b.status === 'confirmed';
+
+                      return (
+                        <tr
+                          key={b.id}
+                          id={`admin-row-${b.id}`}
+                          className={`hover:bg-slate-50/80 transition-colors ${
+                            isPending ? 'bg-amber-50/20' : ''
+                          }`}
+                        >
+                          {/* Status */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <div className="flex flex-col gap-1">
+                              <span
+                                className={`inline-flex items-center gap-1 font-semibold text-[11px] px-2.5 py-0.5 rounded-full border w-fit ${
+                                  isConfirmed
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : isPending
+                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                      : 'bg-red-50 text-red-700 border-red-200'
+                                }`}
+                              >
+                                {isConfirmed
+                                  ? 'Confirmado'
+                                  : isPending
+                                    ? 'Pendente'
+                                    : 'Recusado'}
+                              </span>
+                              {b.whatsappSent ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium">
+                                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                                  WhatsApp enviado
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-600">
+                                  WhatsApp pendente
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Professor & WhatsApp */}
+                          <td className="py-3.5 px-4">
+                            <div className="font-bold text-slate-900 text-sm">
+                              {b.teacherName}
+                            </div>
+                            <div className="flex items-center gap-1 font-mono text-emerald-700 text-xs mt-0.5">
+                              <Phone className="w-3 h-3" />
+                              <span>{b.whatsapp}</span>
+                            </div>
+                          </td>
+
+                          {/* Laboratório & Turma */}
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-1.5 font-semibold text-slate-900">
+                              {b.isMobileLab ? (
+                                <Truck className="w-3.5 h-3.5 text-rose-600" />
+                              ) : (
+                                <Monitor className="w-3.5 h-3.5 text-blue-600" />
+                              )}
+                              <span>{b.labName}</span>
+                            </div>
+                            <div className="text-slate-600 text-xs mt-0.5">
+                              Turma: <span className="font-medium text-slate-800">{b.classGroup}</span>
+                              {b.subject && ` • ${b.subject}`}
+                            </div>
+                            {b.recurrenceGroupId && (
+                              <div className="text-[10px] text-indigo-700 font-bold mt-0.5 flex items-center gap-1">
+                                <Repeat className="w-3 h-3" />
+                                <span>Recorrência ({b.recurrenceIndex && b.recurrenceTotalCount ? `${b.recurrenceIndex}/${b.recurrenceTotalCount}` : 'Série'})</span>
+                              </div>
+                            )}
+                            {b.requestedMachines && (
+                              <div className="text-[11px] text-blue-700 font-semibold mt-0.5 flex items-center gap-1">
+                                <span>💻 {b.requestedMachines} máquinas solicitadas</span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Data & Horário */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <div className="font-medium text-slate-900">
+                              {formatDateBR(b.date)}
+                            </div>
+                            <div className="text-slate-700 text-[11px] flex items-center gap-1 mt-0.5">
+                              <Clock className="w-3 h-3 text-slate-600" />
+                              <span>{b.timeSlot}</span>
+                            </div>
+                          </td>
+
+                          {/* Sala / Local */}
+                          <td className="py-3.5 px-4">
+                            {b.isMobileLab ? (
+                              <div className="bg-amber-100 text-amber-950 px-2.5 py-1 rounded-lg border border-amber-300 inline-block font-bold text-xs">
+                                🚚 {b.roomNumber || 'Sala não especificada'}
+                              </div>
+                            ) : (
+                              <span className="text-slate-700 text-xs">
+                                Prédio dos Labs (Fixo)
+                              </span>
+                            )}
+                            {b.notes && (
+                              <div className="text-[11px] text-slate-600 italic mt-1 line-clamp-1">
+                                Obs: {b.notes}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Ações */}
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* Botão de WhatsApp */}
+                              <button
+                                id={`send-whatsapp-btn-${b.id}`}
+                                onClick={() => handleOpenWhatsAppModal(b)}
+                                title="Encaminhar confirmação via WhatsApp"
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                                  b.whatsappSent
+                                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
+                                }`}
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>{b.whatsappSent ? 'Reenviar WhatsApp' : 'Enviar WhatsApp'}</span>
+                              </button>
+
+                              {/* Aprovar rápido */}
+                              {isPending && (
+                                <button
+                                  id={`approve-btn-${b.id}`}
+                                  onClick={() => handleStatusChange(b.id, 'confirmed')}
+                                  title="Aprovar agendamento"
+                                  className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                >
+                                  <CheckCircle className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {/* Recusar */}
+                              {isPending && (
+                                <button
+                                  id={`reject-btn-${b.id}`}
+                                  onClick={() => handleStatusChange(b.id, 'rejected')}
+                                  title="Recusar agendamento"
+                                  className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                >
+                                  <XCircle className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {/* Excluir */}
+                              <button
+                                id={`delete-btn-${b.id}`}
+                                onClick={() => handleDelete(b.id)}
+                                title="Excluir do histórico"
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Grade visual de horários de todos os 12 laboratórios por dia
+ */
+const ScheduleMatrixView: React.FC<{
+  bookings: Booking[];
+  onOpenWhatsApp: (b: Booking) => void;
+}> = ({ bookings, onOpenWhatsApp }) => {
+  const [matrixDate, setMatrixDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const activeDayBookings = bookings.filter(
+    (b) => b.date === matrixDate && b.status !== 'cancelled' && b.status !== 'rejected',
+  );
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+        <div>
+          <h3 className="font-bold text-slate-900 text-base">
+            Ocupação Geral dos 12 Laboratórios
+          </h3>
+          <p className="text-xs text-slate-500">
+            Visão consolidada por aula/horário para a data selecionada.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-700">Data:</span>
+          <input
+            type="date"
+            value={matrixDate}
+            onChange={(e) => setMatrixDate(e.target.value)}
+            className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg font-medium"
+          />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr className="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold">
+              <th className="p-3 border border-slate-200 sticky left-0 bg-slate-50 z-10 w-44">
+                Laboratório
+              </th>
+              {TIME_SLOTS.slice(0, 9).map((slot) => (
+                <th key={slot.id} className="p-2.5 border border-slate-200 text-center min-w-[130px]">
+                  <div>{slot.label.split('(')[0]}</div>
+                  <div className="text-[10px] font-normal text-slate-400">
+                    {slot.startTime} - {slot.endTime}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {LAB_LIST.map((lab) => {
+              return (
+                <tr key={lab.id} className="hover:bg-slate-50/50">
+                  <td className="p-3 border border-slate-200 sticky left-0 bg-white z-10 font-medium">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-bold text-slate-900">{lab.name}</span>
+                      <span className="text-[10px] text-slate-500">{lab.capacity} máq.</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {lab.isMobile ? '🚚 Móvel' : '🖥️ Fixo'}
+                    </div>
+                  </td>
+
+                  {TIME_SLOTS.slice(0, 9).map((slot) => {
+                    const booking = activeDayBookings.find(
+                      (b) => b.labId === lab.id && b.timeSlot === slot.label,
+                    );
+
+                    if (!booking) {
+                      return (
+                        <td
+                          key={slot.id}
+                          className="p-2 border border-slate-200 text-center text-[10px] text-slate-300 bg-slate-50/20"
+                        >
+                          Livre
+                        </td>
+                      );
+                    }
+
+                    const isConfirmed = booking.status === 'confirmed';
+
+                    return (
+                      <td
+                        key={slot.id}
+                        className={`p-2 border border-slate-200 text-left text-[11px] transition-colors ${
+                          isConfirmed
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                            : 'bg-amber-50 border-amber-200 text-amber-950'
+                        }`}
+                      >
+                        <div className="font-bold truncate">{booking.teacherName}</div>
+                        <div className="text-[10px] truncate text-slate-600">
+                          {booking.classGroup}
+                        </div>
+                        {booking.isMobileLab && (
+                          <div className="text-[10px] font-bold text-rose-700 truncate">
+                            🚚 {booking.roomNumber}
+                          </div>
+                        )}
+                        <button
+                          onClick={() => onOpenWhatsApp(booking)}
+                          className="mt-1 text-[10px] font-semibold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 cursor-pointer"
+                        >
+                          <MessageSquare className="w-2.5 h-2.5" />
+                          <span>WhatsApp</span>
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};

@@ -1,0 +1,8 @@
+{
+  "name": "GestLab",
+  "description": "Sistema de agendamento e gerenciamento de laboratórios fixos e móveis escolares com confirmação via WhatsApp e autenticação administrativa.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
