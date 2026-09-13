@@ -8,9 +8,19 @@ export interface Lab {
   isMobile: boolean;
   description: string;
   badgeColor: string;
+  notes?: string; // Observações do laboratório (equipamentos, orientações, etc.)
+  location?: string; // Localização física (ex: Bloco C - 2º andar)
+  customAdded?: boolean; // Se foi adicionado pelo gestor
+  active?: boolean; // Se o laboratório está ativo no sistema
+  updatedAt?: number;
   softwares?: string[];
   isUnderMaintenance?: boolean; // Se o laboratório está fechado para manutenção
   maintenanceReason?: string; // Motivo da manutenção
+  maintenanceStartDate?: string; // Data inicial da manutenção (YYYY-MM-DD)
+  maintenanceEndDate?: string; // Data final da manutenção (YYYY-MM-DD)
+  maintenanceStartTime?: string; // Horário de início (HH:mm, ex: "07:30")
+  maintenanceEndTime?: string; // Horário de término (HH:mm, ex: "12:00")
+  maintenanceAllDay?: boolean; // Se a interdição vale para o dia todo
   broadcastMessage?: string; // Mensagem/aviso para o usuário no momento do agendamento
 }
 

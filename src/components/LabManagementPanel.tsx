@@ -5,8 +5,15 @@ import {
   updateLabBroadcastMessage,
   updateLabSoftwares,
   clearAllLabsSoftwares,
+  updateLabNotes,
   POPULAR_SOFTWARES_LIST,
 } from '../lib/labService';
+import {
+  formatDateBR,
+  getTodayDateString,
+  formatMaintenancePeriod,
+  getLabMaintenanceStatus,
+} from '../lib/maintenanceUtils';
 import {
   Wrench,
   AlertTriangle,
@@ -24,7 +31,24 @@ import {
   Layers,
   Bell,
   Check,
+  Calendar,
+  Clock,
+  CalendarRange,
+  FileText,
+  Edit3,
+  Building2,
 } from 'lucide-react';
+import { LabModal } from './LabModal';
+
+interface LabMaintenanceDraft {
+  isUnderMaintenance: boolean;
+  reason: string;
+  startDate: string;
+  endDate: string;
+  startTime: string;
+  endTime: string;
+  allDay: boolean;
+}
 
 interface LabManagementPanelProps {
   labs: Lab[];
@@ -36,16 +60,32 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
   const [savingLabId, setSavingLabId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isClearingAllSoftwares, setIsClearingAllSoftwares] = useState(false);
+  const [isLabModalOpen, setIsLabModalOpen] = useState(false);
+  const [labModalTarget, setLabModalTarget] = useState<Lab | null>(null);
 
   // Local draft states per lab
+  const [notesDraft, setNotesDraft] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    labs.forEach((l) => {
+      initial[l.id] = l.notes || '';
+    });
+    return initial;
+  });
+
   const [maintenanceDraft, setMaintenanceDraft] = useState<
-    Record<string, { isUnderMaintenance: boolean; reason: string }>
+    Record<string, LabMaintenanceDraft>
   >(() => {
-    const initial: Record<string, { isUnderMaintenance: boolean; reason: string }> = {};
+    const today = getTodayDateString();
+    const initial: Record<string, LabMaintenanceDraft> = {};
     labs.forEach((l) => {
       initial[l.id] = {
         isUnderMaintenance: Boolean(l.isUnderMaintenance),
         reason: l.maintenanceReason || '',
+        startDate: l.maintenanceStartDate || today,
+        endDate: l.maintenanceEndDate || l.maintenanceStartDate || today,
+        startTime: l.maintenanceStartTime || '07:30',
+        endTime: l.maintenanceEndTime || '17:40',
+        allDay: l.maintenanceAllDay !== undefined ? l.maintenanceAllDay : true,
       };
     });
     return initial;
@@ -69,6 +109,17 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
 
   // Sync when external labs change
   useEffect(() => {
+    const today = getTodayDateString();
+    setNotesDraft((prev) => {
+      const updated = { ...prev };
+      labs.forEach((l) => {
+        if (updated[l.id] === undefined) {
+          updated[l.id] = l.notes || '';
+        }
+      });
+      return updated;
+    });
+
     setMaintenanceDraft((prev) => {
       const updated = { ...prev };
       labs.forEach((l) => {
@@ -76,6 +127,11 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
           updated[l.id] = {
             isUnderMaintenance: Boolean(l.isUnderMaintenance),
             reason: l.maintenanceReason || '',
+            startDate: l.maintenanceStartDate || today,
+            endDate: l.maintenanceEndDate || l.maintenanceStartDate || today,
+            startTime: l.maintenanceStartTime || '07:30',
+            endTime: l.maintenanceEndTime || '17:40',
+            allDay: l.maintenanceAllDay !== undefined ? l.maintenanceAllDay : true,
           };
         }
       });
@@ -104,31 +160,117 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
   }, [labs]);
 
   const selectedLab = labs.find((l) => l.id === selectedLabId) || labs[0];
-  const currentMaintenance = maintenanceDraft[selectedLabId] || {
+  const today = getTodayDateString();
+  const currentMaintenance: LabMaintenanceDraft = maintenanceDraft[selectedLabId] || {
     isUnderMaintenance: false,
     reason: '',
+    startDate: today,
+    endDate: today,
+    startTime: '07:30',
+    endTime: '17:40',
+    allDay: true,
   };
   const currentBroadcast = broadcastDraft[selectedLabId] || '';
   const currentSoftwares = softwaresDraft[selectedLabId] || [];
 
-  // Toggle Maintenance
+  const [dateModeByLab, setDateModeByLab] = useState<Record<string, 'single' | 'range'>>({});
+
+  const dateMode: 'single' | 'range' =
+    dateModeByLab[selectedLabId] ||
+    (currentMaintenance.startDate && currentMaintenance.endDate && currentMaintenance.startDate !== currentMaintenance.endDate
+      ? 'range'
+      : 'single');
+
+  const handleSetDateMode = (mode: 'single' | 'range') => {
+    setDateModeByLab((prev) => ({ ...prev, [selectedLabId]: mode }));
+    if (mode === 'single') {
+      // Trava na mesma data: início e término iguais
+      const baseDate = currentMaintenance.startDate || today;
+      setMaintenanceDraft((prev) => ({
+        ...prev,
+        [selectedLabId]: {
+          ...(prev[selectedLabId] || currentMaintenance),
+          startDate: baseDate,
+          endDate: baseDate,
+        },
+      }));
+    }
+  };
+
+  // Maintenance handlers
   const handleToggleMaintenance = (val: boolean) => {
     setMaintenanceDraft((prev) => ({
       ...prev,
       [selectedLabId]: {
-        ...prev[selectedLabId],
+        ...(prev[selectedLabId] || currentMaintenance),
         isUnderMaintenance: val,
-        reason: val ? (prev[selectedLabId]?.reason || 'Em manutenção técnica.') : '',
+        reason: val ? (prev[selectedLabId]?.reason || 'Manutenção técnica e preventiva.') : '',
       },
     }));
   };
 
-  const handleReasonChange = (reason: string) => {
+  const handleMaintenanceFieldChange = <K extends keyof LabMaintenanceDraft>(
+    field: K,
+    val: LabMaintenanceDraft[K],
+  ) => {
     setMaintenanceDraft((prev) => ({
       ...prev,
       [selectedLabId]: {
-        ...prev[selectedLabId],
-        reason,
+        ...(prev[selectedLabId] || currentMaintenance),
+        [field]: val,
+      },
+    }));
+  };
+
+  const handleSingleDateChange = (newDate: string) => {
+    setMaintenanceDraft((prev) => ({
+      ...prev,
+      [selectedLabId]: {
+        ...(prev[selectedLabId] || currentMaintenance),
+        startDate: newDate,
+        endDate: newDate,
+      },
+    }));
+  };
+
+  // Preset handlers for maintenance dates
+  const setDatePreset = (daysOffset: number, spanDays: number = 1) => {
+    const start = new Date();
+    start.setDate(start.getDate() + daysOffset);
+    const end = new Date(start);
+    end.setDate(end.getDate() + (spanDays - 1));
+
+    const toISO = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const dayStr = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dayStr}`;
+    };
+
+    if (spanDays === 1) {
+      setDateModeByLab((prev) => ({ ...prev, [selectedLabId]: 'single' }));
+    } else {
+      setDateModeByLab((prev) => ({ ...prev, [selectedLabId]: 'range' }));
+    }
+
+    setMaintenanceDraft((prev) => ({
+      ...prev,
+      [selectedLabId]: {
+        ...(prev[selectedLabId] || currentMaintenance),
+        startDate: toISO(start),
+        endDate: toISO(end),
+      },
+    }));
+  };
+
+  const setTimePreset = (startTime: string, endTime: string, allDay: boolean = false) => {
+    setMaintenanceDraft((prev) => ({
+      ...prev,
+      [selectedLabId]: {
+        ...(prev[selectedLabId] || currentMaintenance),
+        startTime,
+        endTime,
+        allDay,
       },
     }));
   };
@@ -165,17 +307,30 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
     setSavingLabId(labId);
     setSuccessMsg(null);
     try {
-      const maint = maintenanceDraft[labId] || { isUnderMaintenance: false, reason: '' };
+      const maint = maintenanceDraft[labId] || currentMaintenance;
       const broad = broadcastDraft[labId] || '';
       const softs = softwaresDraft[labId] || [];
+      const notes = notesDraft[labId] !== undefined ? notesDraft[labId] : (selectedLab.notes || '');
 
       await Promise.all([
-        updateLabMaintenanceStatus(labId, maint.isUnderMaintenance, maint.reason),
+        updateLabMaintenanceStatus(
+          labId,
+          maint.isUnderMaintenance,
+          maint.reason,
+          {
+            startDate: maint.isUnderMaintenance ? maint.startDate : undefined,
+            endDate: maint.isUnderMaintenance ? maint.endDate : undefined,
+            startTime: maint.isUnderMaintenance && !maint.allDay ? maint.startTime : undefined,
+            endTime: maint.isUnderMaintenance && !maint.allDay ? maint.endTime : undefined,
+            allDay: maint.allDay,
+          },
+        ),
         updateLabBroadcastMessage(labId, broad),
         updateLabSoftwares(labId, softs),
+        updateLabNotes(labId, notes),
       ]);
 
-      setSuccessMsg(`Configurações e status do ${selectedLab.name} gravados com sucesso!`);
+      setSuccessMsg(`Configurações de agendamento e manutenção do ${selectedLab.name} salvas com sucesso!`);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (e) {
       console.error('Erro ao salvar laboratório:', e);
@@ -247,14 +402,28 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Lab Selector Sidebar */}
         <div className="lg:col-span-4 space-y-2">
-          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block px-1">
-            Selecione o Laboratório ({labs.length})
-          </span>
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+              Laboratórios ({labs.length})
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setLabModalTarget(null);
+                setIsLabModalOpen(true);
+              }}
+              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ Novo Lab</span>
+            </button>
+          </div>
           <div className="bg-white rounded-2xl border border-slate-200 p-2 space-y-1 shadow-2xs max-h-[620px] overflow-y-auto">
             {labs.map((lab) => {
               const isSelected = lab.id === selectedLabId;
               const isMaint = maintenanceDraft[lab.id]?.isUnderMaintenance;
               const hasMsg = Boolean(broadcastDraft[lab.id]?.trim());
+              const hasNotes = Boolean((notesDraft[lab.id] !== undefined ? notesDraft[lab.id] : lab.notes)?.trim());
               const count = (softwaresDraft[lab.id] || []).length;
 
               return (
@@ -302,9 +471,15 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                             Aviso
                           </span>
                         )}
+                        {hasNotes && (
+                          <span className="text-[9px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded-sm" title="Possui observações cadastradas">
+                            Obs
+                          </span>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-500 truncate">
                         {lab.capacity} máq. • {lab.isMobile ? 'Móvel' : 'Fixo'}
+                        {lab.customAdded && ' • Custom'}
                       </div>
                     </div>
                   </div>
@@ -352,8 +527,16 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                       {selectedLab.capacity} computadores
                     </span>
                     {currentMaintenance.isUnderMaintenance ? (
-                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
-                        FECHADO PARA MANUTENÇÃO
+                      <span
+                        className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${
+                          currentMaintenance.startDate > today
+                            ? 'bg-amber-100 text-amber-900 border-amber-300'
+                            : 'bg-rose-100 text-rose-800 border-rose-200'
+                        }`}
+                      >
+                        {currentMaintenance.startDate > today
+                          ? 'MANUTENÇÃO AGENDADA'
+                          : 'FECHADO PARA MANUTENÇÃO'}
                       </span>
                     ) : (
                       <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -361,50 +544,164 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500">{selectedLab.description}</p>
+                  <p className="text-xs text-slate-500">
+                    {selectedLab.description}
+                    {currentMaintenance.isUnderMaintenance && (
+                      <span className="block mt-0.5 font-semibold text-rose-700">
+                        ⚠️ Manutenção:{' '}
+                        {currentMaintenance.startDate === currentMaintenance.endDate
+                          ? formatDateBR(currentMaintenance.startDate)
+                          : `${formatDateBR(currentMaintenance.startDate)} a ${formatDateBR(currentMaintenance.endDate)}`}
+                        {' • '}
+                        {currentMaintenance.allDay
+                          ? 'Período integral'
+                          : `${currentMaintenance.startTime} às ${currentMaintenance.endTime}`}
+                      </span>
+                    )}
+                  </p>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleSaveLabSettings(selectedLab.id)}
-                disabled={savingLabId === selectedLab.id}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 self-start sm:self-center cursor-pointer disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                <span>{savingLabId === selectedLab.id ? 'Salvando...' : 'Salvar Alterações'}</span>
-              </button>
+              <div className="flex items-center gap-2 self-start sm:self-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLabModalTarget(selectedLab);
+                    setIsLabModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl border border-slate-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  title="Editar nome, capacidade, tipo e cor do laboratório"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Editar Dados do Lab</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSaveLabSettings(selectedLab.id)}
+                  disabled={savingLabId === selectedLab.id}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{savingLabId === selectedLab.id ? 'Salvando...' : 'Salvar Alterações'}</span>
+                </button>
+              </div>
             </div>
 
-            {/* SEÇÃO 1: STATUS DE MANUTENÇÃO */}
-            <div className={`p-4 rounded-xl border ${currentMaintenance.isUnderMaintenance ? 'bg-rose-50/70 border-rose-200' : 'bg-slate-50/70 border-slate-200'}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-2.5">
-                  <Wrench className={`w-5 h-5 mt-0.5 ${currentMaintenance.isUnderMaintenance ? 'text-rose-600' : 'text-slate-500'}`} />
+            {/* SEÇÃO: OBSERVAÇÕES E DADOS DO LABORATÓRIO */}
+            <div className="p-5 rounded-2xl border border-amber-200/90 bg-amber-50/40 space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-amber-200/70">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <FileText className="w-5 h-5" />
+                  </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-900">
-                      Interdição / Fechamento para Manutenção
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <span>Observações e Orientações do Laboratório</span>
+                      {selectedLab.customAdded && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white">
+                          Criado pelo Admin
+                        </span>
+                      )}
                     </h4>
-                    <p className="text-[11px] text-slate-600 mt-0.5">
-                      Quando ativado, o laboratório ficará bloqueado para novos agendamentos e exibirá o alerta de manutenção aos professores.
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Estas anotações aparecem em destaque para os professores na consulta e no agendamento.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLabModalTarget(selectedLab);
+                    setIsLabModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold rounded-xl border border-amber-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs self-start sm:self-center"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Editar em Janela Completa</span>
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-amber-950">
+                    <FileText className="w-4 h-4 text-amber-600" />
+                    <span>Observações Gerais:</span>
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-normal">
+                    (Ex: ar-condicionado, controle remoto, localização de chave, tomadas extras, projetor)
+                  </span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={notesDraft[selectedLab.id] !== undefined ? notesDraft[selectedLab.id] : (selectedLab.notes || '')}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNotesDraft((prev) => ({ ...prev, [selectedLab.id]: val }));
+                  }}
+                  placeholder="Ex: Chave retirada na coordenação com o responsável do turno. Possui 6 tomadas adicionais para notebooks e projetor HDMI na parede frontal. Ar condicionado no controle 1."
+                  className="w-full px-3.5 py-2.5 bg-white border border-amber-300 rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-600 transition-all leading-relaxed"
+                />
+              </div>
+
+              {selectedLab.location && (
+                <div className="flex items-center gap-2 text-xs text-slate-600 bg-white/70 px-3 py-1.5 rounded-lg border border-amber-200">
+                  <Building2 className="w-3.5 h-3.5 text-amber-700" />
+                  <span><strong>Localização física:</strong> {selectedLab.location}</span>
+                </div>
+              )}
+            </div>
+
+            {/* SEÇÃO 1: STATUS E AGENDAMENTO DE MANUTENÇÃO */}
+            <div
+              className={`p-5 rounded-2xl border transition-all ${
+                currentMaintenance.isUnderMaintenance
+                  ? 'bg-rose-50/70 border-rose-200 ring-1 ring-rose-200'
+                  : 'bg-slate-50/70 border-slate-200'
+              }`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                      currentMaintenance.isUnderMaintenance
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <Wrench className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <span>Interdição & Agendamento de Manutenção</span>
+                      {currentMaintenance.isUnderMaintenance && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white">
+                          Ativo
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-xs text-slate-600 mt-0.5 max-w-xl">
+                      Defina o dia, horário e período em que o laboratório estará em manutenção técnica. O sistema bloqueará reservas conflitantes e notificará os professores.
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
                   <button
+                    id="lab-maintenance-toggle-btn"
                     type="button"
                     onClick={() => handleToggleMaintenance(!currentMaintenance.isUnderMaintenance)}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3.5 py-2 text-xs font-bold rounded-xl border transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
                       currentMaintenance.isUnderMaintenance
-                        ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400'
+                        ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
+                        : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400 hover:bg-slate-50'
                     }`}
                   >
                     {currentMaintenance.isUnderMaintenance ? (
                       <>
-                        <XCircle className="w-4 h-4" />
-                        <span>Fechado (Em Manutenção)</span>
+                        <XCircle className="w-4 h-4 text-white" />
+                        <span>Em Manutenção / Agendado</span>
                       </>
                     ) : (
                       <>
@@ -416,19 +713,409 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                 </div>
               </div>
 
+              {/* CAMPOS DE AGENDAMENTO DE PERÍODO */}
               {currentMaintenance.isUnderMaintenance && (
-                <div className="mt-3 pt-3 border-t border-rose-200/60 space-y-1.5 animate-fade-in">
-                  <label htmlFor="maintenance-reason-input" className="block text-xs font-semibold text-rose-900">
-                    Motivo da Manutenção (visível aos professores ao tentar agendar):
-                  </label>
-                  <input
-                    id="maintenance-reason-input"
-                    type="text"
-                    placeholder="Ex: Troca de cabeamento de rede, formatação geral, conserto de ar-condicionado..."
-                    value={currentMaintenance.reason}
-                    onChange={(e) => handleReasonChange(e.target.value)}
-                    className="w-full px-3.5 py-2 text-xs bg-white border border-rose-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-600 text-slate-800 font-medium"
-                  />
+                <div className="mt-5 pt-4 border-t border-rose-200/70 space-y-4 animate-fade-in">
+                  {/* Bloco 1: Tipo de Bloqueio por Data (Data Específica vs Período) */}
+                  <div className="bg-white/90 p-4 rounded-xl border border-rose-200 space-y-3.5 shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-rose-100">
+                      <div className="flex items-center gap-2">
+                        <CalendarRange className="w-4 h-4 text-rose-600" />
+                        <span className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                          1. Bloqueio por Data
+                        </span>
+                      </div>
+
+                      {/* Seletor entre Data Específica e Período */}
+                      <div className="inline-flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                        <button
+                          type="button"
+                          id="btn-maint-mode-single"
+                          onClick={() => handleSetDateMode('single')}
+                          className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                            dateMode === 'single'
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-700 hover:text-slate-900'
+                          }`}
+                        >
+                          <Calendar className="w-3.5 h-3.5" />
+                          <span>Data Específica (1 Dia)</span>
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-maint-mode-range"
+                          onClick={() => handleSetDateMode('range')}
+                          className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                            dateMode === 'range'
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-700 hover:text-slate-900'
+                          }`}
+                        >
+                          <CalendarRange className="w-3.5 h-3.5" />
+                          <span>Período (Vários Dias)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Conteúdo para DATA ESPECÍFICA */}
+                    {dateMode === 'single' ? (
+                      <div className="space-y-3 animate-fade-in">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <span className="text-[11px] text-slate-600">
+                            O bloqueio será aplicado <strong>exclusivamente nesta data</strong>.
+                          </span>
+                          {/* Atalhos para Data Específica */}
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[10px] font-medium text-slate-500 mr-1">Atalhos:</span>
+                            <button
+                              type="button"
+                              onClick={() => setDatePreset(0, 1)}
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors cursor-pointer"
+                            >
+                              Hoje
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDatePreset(1, 1)}
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors cursor-pointer"
+                            >
+                              Amanhã
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const d = new Date();
+                                const daysUntilMonday = ((1 - d.getDay() + 7) % 7) || 7;
+                                setDatePreset(daysUntilMonday, 1);
+                              }}
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors cursor-pointer"
+                            >
+                              Próx. Segunda
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const d = new Date();
+                                const daysUntilFriday = ((5 - d.getDay() + 7) % 7) || 7;
+                                setDatePreset(daysUntilFriday, 1);
+                              }}
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors cursor-pointer"
+                            >
+                              Próx. Sexta
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="max-w-md">
+                          <label
+                            htmlFor="maintenance-single-date"
+                            className="block text-[11px] font-bold text-slate-700 mb-1"
+                          >
+                            Data do Bloqueio:
+                          </label>
+                          <div className="relative">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                            <input
+                              id="maintenance-single-date"
+                              type="date"
+                              value={currentMaintenance.startDate}
+                              onChange={(e) => handleSingleDateChange(e.target.value)}
+                              className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 font-semibold text-slate-800"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Conteúdo para PERÍODO DE VÁRIOS DIAS */
+                      <div className="space-y-3 animate-fade-in">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <span className="text-[11px] text-slate-600">
+                            O bloqueio vigorará do dia de início até a data de término (inclusive).
+                          </span>
+                          {/* Atalhos para Período */}
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[10px] font-medium text-slate-500 mr-1">Atalhos:</span>
+                            <button
+                              type="button"
+                              onClick={() => setDatePreset(0, 3)}
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors cursor-pointer"
+                            >
+                              Próx. 3 dias
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDatePreset(0, 5)}
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors cursor-pointer"
+                            >
+                              5 dias corridos
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDatePreset(7, 5)}
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors cursor-pointer"
+                            >
+                              Próx. Semana (5 dias)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDatePreset(0, 15)}
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md border border-rose-200 transition-colors cursor-pointer"
+                            >
+                              15 dias
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label
+                              htmlFor="maintenance-start-date"
+                              className="block text-[11px] font-bold text-slate-700 mb-1"
+                            >
+                              Data de Início:
+                            </label>
+                            <div className="relative">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                              <input
+                                id="maintenance-start-date"
+                                type="date"
+                                value={currentMaintenance.startDate}
+                                onChange={(e) => {
+                                  const newStart = e.target.value;
+                                  handleMaintenanceFieldChange('startDate', newStart);
+                                  if (newStart > currentMaintenance.endDate) {
+                                    handleMaintenanceFieldChange('endDate', newStart);
+                                  }
+                                }}
+                                className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 font-semibold text-slate-800"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label
+                              htmlFor="maintenance-end-date"
+                              className="block text-[11px] font-bold text-slate-700 mb-1"
+                            >
+                              Data de Término:
+                            </label>
+                            <div className="relative">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                              <input
+                                id="maintenance-end-date"
+                                type="date"
+                                min={currentMaintenance.startDate}
+                                value={currentMaintenance.endDate}
+                                onChange={(e) => handleMaintenanceFieldChange('endDate', e.target.value)}
+                                className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 font-semibold text-slate-800"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Bloco 2: Tipo de Bloqueio por Horário (Dia Todo vs Horário Específico) */}
+                  <div className="bg-white/90 p-4 rounded-xl border border-rose-200 space-y-3.5 shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-rose-100">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-rose-600" />
+                        <span className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                          2. Bloqueio por Horário / Turno
+                        </span>
+                      </div>
+
+                      {/* Seletor entre Dia Inteiro e Horário Específico */}
+                      <div className="inline-flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                        <button
+                          type="button"
+                          id="btn-maint-allday-yes"
+                          onClick={() => handleMaintenanceFieldChange('allDay', true)}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            currentMaintenance.allDay
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-700 hover:text-slate-900'
+                          }`}
+                        >
+                          Dia Inteiro (Integral)
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-maint-allday-no"
+                          onClick={() => handleMaintenanceFieldChange('allDay', false)}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            !currentMaintenance.allDay
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-700 hover:text-slate-900'
+                          }`}
+                        >
+                          Horário Específico
+                        </button>
+                      </div>
+                    </div>
+
+                    {currentMaintenance.allDay ? (
+                      <div className="p-3 bg-rose-50/70 border border-rose-200 rounded-xl text-xs text-rose-900 flex items-center gap-2 animate-fade-in">
+                        <CheckCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span>
+                          <strong>Interdição Integral:</strong> O laboratório ficará bloqueado durante todos os turnos (manhã, tarde e noite) nas datas selecionadas.
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 animate-fade-in">
+                        {/* Presets rápidos de turnos */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] font-medium text-slate-500 mr-1">Turnos rápidos:</span>
+                          <button
+                            type="button"
+                            onClick={() => setTimePreset('07:30', '11:55', false)}
+                            className="px-2.5 py-1 text-[11px] font-semibold bg-sky-50 text-sky-800 hover:bg-sky-100 rounded-lg border border-sky-200 transition-colors cursor-pointer"
+                          >
+                            Manhã (07:30 - 11:55)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTimePreset('13:15', '17:40', false)}
+                            className="px-2.5 py-1 text-[11px] font-semibold bg-amber-50 text-amber-800 hover:bg-amber-100 rounded-lg border border-amber-200 transition-colors cursor-pointer"
+                          >
+                            Tarde (13:15 - 17:40)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTimePreset('19:00', '22:15', false)}
+                            className="px-2.5 py-1 text-[11px] font-semibold bg-indigo-50 text-indigo-800 hover:bg-indigo-100 rounded-lg border border-indigo-200 transition-colors cursor-pointer"
+                          >
+                            Noite (19:00 - 22:15)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTimePreset('08:00', '17:00', false)}
+                            className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 text-slate-800 hover:bg-slate-200 rounded-lg border border-slate-300 transition-colors cursor-pointer"
+                          >
+                            Comercial (08:00 - 17:00)
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label
+                              htmlFor="maintenance-start-time"
+                              className="block text-[11px] font-bold text-slate-700 mb-1"
+                            >
+                              Horário de Início do Bloqueio:
+                            </label>
+                            <input
+                              id="maintenance-start-time"
+                              type="time"
+                              value={currentMaintenance.startTime}
+                              onChange={(e) => handleMaintenanceFieldChange('startTime', e.target.value)}
+                              className="w-full px-3.5 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 font-semibold text-slate-800"
+                            />
+                          </div>
+
+                          <div>
+                            <label
+                              htmlFor="maintenance-end-time"
+                              className="block text-[11px] font-bold text-slate-700 mb-1"
+                            >
+                              Horário de Término do Bloqueio:
+                            </label>
+                            <input
+                              id="maintenance-end-time"
+                              type="time"
+                              value={currentMaintenance.endTime}
+                              onChange={(e) => handleMaintenanceFieldChange('endTime', e.target.value)}
+                              className="w-full px-3.5 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 font-semibold text-slate-800"
+                            />
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] text-slate-500 italic">
+                          ℹ️ Fora deste horário ({currentMaintenance.startTime} às {currentMaintenance.endTime}), o laboratório continuará liberado para reservas normais de outros turnos.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Motivo da Manutenção */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label
+                        htmlFor="maintenance-reason-input"
+                        className="block text-xs font-bold text-rose-950"
+                      >
+                        Motivo da Manutenção (exibido aos professores ao tentar agendar):
+                      </label>
+                      <span className="text-[10px] text-slate-500">Obrigatório informar aos docentes</span>
+                    </div>
+
+                    <input
+                      id="maintenance-reason-input"
+                      type="text"
+                      placeholder="Ex: Troca de cabeamento de rede, formatação geral, conserto de ar-condicionado..."
+                      value={currentMaintenance.reason}
+                      onChange={(e) => handleMaintenanceFieldChange('reason', e.target.value)}
+                      className="w-full px-3.5 py-2 text-xs bg-white border border-rose-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-600 text-slate-800 font-medium"
+                    />
+
+                    {/* Sugestões rápidas de motivos */}
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                      <span className="text-[10px] text-slate-500">Sugestões:</span>
+                      {[
+                        'Manutenção preventiva e limpeza',
+                        'Troca de cabeamento de rede',
+                        'Formatação e atualização de softwares',
+                        'Reparo de ar-condicionado',
+                        'Substituição de fontes e periféricos',
+                      ].map((sug) => (
+                        <button
+                          key={sug}
+                          type="button"
+                          onClick={() => handleMaintenanceFieldChange('reason', sug)}
+                          className="text-[10px] px-2 py-0.5 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-600 hover:text-rose-700 rounded-md transition-colors cursor-pointer"
+                        >
+                          + {sug}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Banner de Resumo da Manutenção Agendada */}
+                  <div className="p-3.5 bg-amber-50/80 border border-amber-300/80 rounded-xl flex items-start justify-between gap-3 text-amber-950 text-xs">
+                    <div className="flex items-start gap-2.5">
+                      <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-amber-900">
+                          Resumo do Bloqueio Agendado:
+                        </p>
+                        <p className="text-[11px] text-amber-800 mt-0.5">
+                          📅 <strong>Período:</strong>{' '}
+                          {currentMaintenance.startDate === currentMaintenance.endDate
+                            ? `Dia ${formatDateBR(currentMaintenance.startDate)}`
+                            : `De ${formatDateBR(currentMaintenance.startDate)} até ${formatDateBR(currentMaintenance.endDate)}`}
+                          {' • '}
+                          ⏰ <strong>Horário:</strong>{' '}
+                          {currentMaintenance.allDay
+                            ? 'Dia todo (integral)'
+                            : `Das ${currentMaintenance.startTime} às ${currentMaintenance.endTime}`}
+                        </p>
+                        <p className="text-[11px] text-amber-800 mt-0.5">
+                          🛠️ <strong>Motivo:</strong>{' '}
+                          {currentMaintenance.reason || 'Manutenção técnica geral'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleMaintenance(false)}
+                      className="px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:text-rose-900 bg-white border border-rose-200 rounded-lg hover:bg-rose-50 transition-colors shrink-0 cursor-pointer"
+                      title="Liberar laboratório e remover agendamento de manutenção"
+                    >
+                      Remover Bloqueio
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -592,6 +1279,26 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
           </div>
         </div>
       </div>
+
+      {/* Modal para Incluir / Editar Laboratório */}
+      <LabModal
+        isOpen={isLabModalOpen}
+        labToEdit={labModalTarget}
+        onClose={() => setIsLabModalOpen(false)}
+        onSaved={(savedLab) => {
+          setSelectedLabId(savedLab.id);
+          setSuccessMsg(`Laboratório "${savedLab.name}" salvo com sucesso!`);
+          setTimeout(() => setSuccessMsg(null), 4000);
+        }}
+        onDeleted={(deletedId) => {
+          const remaining = labs.filter((l) => l.id !== deletedId);
+          if (remaining.length > 0) {
+            setSelectedLabId(remaining[0].id);
+          }
+          setSuccessMsg('Laboratório removido com sucesso!');
+          setTimeout(() => setSuccessMsg(null), 4000);
+        }}
+      />
     </div>
   );
 };

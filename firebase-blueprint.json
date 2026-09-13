@@ -1,0 +1,94 @@
+{
+  "entities": {
+    "Booking": {
+      "title": "Booking",
+      "description": "Registro de agendamento de laboratório de informática",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "labId": { "type": "string" },
+        "labName": { "type": "string" },
+        "date": { "type": "string" },
+        "timeSlot": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "confirmed", "rejected", "completed", "cancelled"]
+        },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["teacherName", "whatsapp", "labId", "date", "timeSlot", "status"]
+    },
+    "LabConfig": {
+      "title": "LabConfig",
+      "description": "Configurações, dados cadastrais, observações, softwares e status de manutenção do laboratório",
+      "type": "object",
+      "properties": {
+        "labId": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "capacity": { "type": "number" },
+        "type": { "type": "string" },
+        "isMobile": { "type": "boolean" },
+        "description": { "type": "string" },
+        "notes": { "type": "string" },
+        "badgeColor": { "type": "string" },
+        "customAdded": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "softwares": { "type": "array" },
+        "isUnderMaintenance": { "type": "boolean" },
+        "maintenanceReason": { "type": "string" },
+        "maintenanceStartDate": { "type": "string" },
+        "maintenanceEndDate": { "type": "string" },
+        "maintenanceStartTime": { "type": "string" },
+        "maintenanceEndTime": { "type": "string" },
+        "maintenanceAllDay": { "type": "boolean" },
+        "broadcastMessage": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["labId"]
+    },
+    "Technician": {
+      "title": "Technician",
+      "description": "Cadastro de técnicos de suporte e laboratórios",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["name", "whatsapp", "active"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Configurações institucionais do GestLab",
+      "type": "object",
+      "properties": {
+        "subtitle": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Coleção de agendamentos realizados pelos professores"
+    },
+    "/labs_config/{labId}": {
+      "schema": "LabConfig",
+      "description": "Configurações de softwares, avisos e manutenções dos laboratórios"
+    },
+    "/technicians/{technicianId}": {
+      "schema": "Technician",
+      "description": "Equipe de técnicos de laboratório cadastrados"
+    },
+    "/settings/{settingId}": {
+      "schema": "Settings",
+      "description": "Configurações globais do sistema"
+    }
+  }
+}

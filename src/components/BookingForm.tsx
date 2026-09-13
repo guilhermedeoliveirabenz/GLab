@@ -7,6 +7,7 @@ import {
   calculateEndDateFromCount,
 } from '../lib/recurrenceUtils';
 import { formatDateBR } from '../lib/whatsapp';
+import { getLabMaintenanceStatus } from '../lib/maintenanceUtils';
 import { useAuth } from '../lib/authContext';
 import {
   Calendar,
@@ -126,7 +127,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   };
 
   const isMobileLab = selectedLab?.isMobile || false;
-  const isLabUnderMaintenance = Boolean(selectedLab?.isUnderMaintenance);
+  const labMaintenanceInfo = getLabMaintenanceStatus(selectedLab, date, startTime, endTime);
+  const isLabUnderMaintenance = labMaintenanceInfo.isUnderMaintenance;
   const hasLabBroadcastMessage = Boolean(selectedLab?.broadcastMessage?.trim());
 
   // Helper to check conflict across dates
@@ -156,6 +158,30 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       const conf = checkBookingConflict(existingBookings, labId, d, formattedTimeSlot, startTime, endTime);
       if (conf) {
         conflictsFound.push({ date: d, conflict: conf });
+      } else {
+        // Verifica se a data colide com manutenção agendada no laboratório
+        const maintOnDate = getLabMaintenanceStatus(selectedLab, d, startTime, endTime);
+        if (maintOnDate.isUnderMaintenance) {
+          conflictsFound.push({
+            date: d,
+            conflict: {
+              id: `maint-${d}`,
+              labId,
+              labName: selectedLab?.name || 'Laboratório',
+              isMobileLab: Boolean(selectedLab?.isMobile),
+              shift: 'manha',
+              whatsappSent: false,
+              date: d,
+              timeSlot: formattedTimeSlot,
+              teacherName: 'MANUTENÇÃO AGENDADA',
+              whatsapp: '',
+              classGroup: 'Interdição Técnica',
+              subject: maintOnDate.reason || 'Manutenção programada',
+              status: 'confirmed',
+              createdAt: Date.now(),
+            },
+          });
+        }
       }
     });
 
@@ -180,7 +206,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     }
     if (isLabUnderMaintenance) {
       setConflictError(
-        `O ${selectedLab.name} está temporariamente FECHADO PARA MANUTENÇÃO (${selectedLab.maintenanceReason || 'Em reparos técnicos'}). Não é possível realizar agendamentos no momento.`,
+        `O ${selectedLab.name} possui manutenção agendada para este dia/horário (${labMaintenanceInfo.formattedPeriod} - Motivo: ${labMaintenanceInfo.reason}). Não é possível agendar neste período.`,
       );
       return;
     }
@@ -264,7 +290,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     // Validação de bloqueio por manutenção
     if (isLabUnderMaintenance) {
       setConflictError(
-        `O ${selectedLab.name} está temporariamente FECHADO PARA MANUTENÇÃO (${selectedLab.maintenanceReason || 'Em reparos técnicos'}). Por favor, escolha outro laboratório.`,
+        `O ${selectedLab.name} possui manutenção agendada (${labMaintenanceInfo.formattedPeriod} - Motivo: ${labMaintenanceInfo.reason}). Por favor, escolha outro laboratório ou outro horário.`,
       );
       return;
     }
@@ -508,7 +534,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
             {labs.map((lab) => {
               const isSelected = lab.id === labId;
-              const isMaint = Boolean(lab.isUnderMaintenance);
+              const labMaintStatus = getLabMaintenanceStatus(lab, date, startTime, endTime);
+              const isMaintActive = labMaintStatus.isUnderMaintenance;
+              const isMaintFuture = !isMaintActive && labMaintStatus.isScheduledFuture;
+
               return (
                 <button
                   key={lab.id}
@@ -518,16 +547,29 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                   className={`p-3 rounded-xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
                     isSelected
                       ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-600/20 shadow-xs'
-                      : isMaint
-                        ? 'border-rose-200 bg-rose-50/40 hover:bg-rose-50/70'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      : isMaintActive
+                        ? 'border-rose-300 bg-rose-50/50 hover:bg-rose-50/80'
+                        : isMaintFuture
+                          ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50/70'
+                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                   }`}
+                  title={
+                    isMaintActive
+                      ? `Fechado para manutenção (${labMaintStatus.formattedPeriod})`
+                      : isMaintFuture
+                        ? `Manutenção programada para ${labMaintStatus.formattedPeriod}`
+                        : undefined
+                  }
                 >
                   <div className="flex items-center justify-between gap-1 mb-1">
                     <span className="font-bold text-xs text-slate-900 truncate">{lab.name}</span>
-                    {isMaint ? (
+                    {isMaintActive ? (
                       <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-rose-600 text-white shrink-0">
                         Manutenção
+                      </span>
+                    ) : isMaintFuture ? (
+                      <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-500 text-white shrink-0">
+                        Agendada
                       </span>
                     ) : lab.isMobile ? (
                       <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 shrink-0">
@@ -548,19 +590,38 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             })}
           </div>
 
-          {/* ALERTA DE MANUTENÇÃO (Se o lab selecionado estiver fechado) */}
+          {/* ALERTA DE MANUTENÇÃO (Se o lab selecionado estiver fechado no horário escolhido) */}
           {isLabUnderMaintenance && (
-            <div className="mt-3 p-4 bg-rose-50 border-2 border-rose-300 rounded-xl text-rose-900 flex items-start gap-3 animate-fade-in">
+            <div className="mt-3 p-4 bg-rose-50 border-2 border-rose-300 rounded-xl text-rose-900 flex items-start gap-3 animate-fade-in shadow-2xs">
               <Wrench className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-sm font-bold text-rose-800">
-                  {selectedLab.name} ESTÁ FECHADO PARA MANUTENÇÃO TÉCNICA
+              <div className="flex-1">
+                <h4 className="text-sm font-bold text-rose-900">
+                  {selectedLab.name} ESTÁ EM MANUTENÇÃO NO PERÍODO SELECIONADO
                 </h4>
-                <p className="text-xs text-rose-700 mt-1">
-                  <strong>Motivo:</strong> {selectedLab.maintenanceReason || 'Em reparos técnicos agendados.'}
+                <p className="text-xs text-rose-800 mt-1">
+                  📅 <strong>Período Interditado:</strong> {labMaintenanceInfo.formattedPeriod}
+                </p>
+                <p className="text-xs text-rose-700 mt-0.5">
+                  🛠️ <strong>Motivo:</strong> {labMaintenanceInfo.reason || 'Em reparos técnicos agendados.'}
                 </p>
                 <p className="text-[11px] text-rose-600 mt-1">
-                  Não é permitido realizar reservas para este espaço enquanto estiver interditado. Por gentileza, selecione outro laboratório da lista.
+                  Não é permitido realizar reservas para este laboratório no período interditado. Por gentileza, altere a data, horário ou selecione outro laboratório da lista.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* AVISO DE MANUTENÇÃO FUTURA (Se o lab estiver livre na data atual mas tiver manutenção próxima) */}
+          {!isLabUnderMaintenance && labMaintenanceInfo.isScheduledFuture && (
+            <div className="mt-3 p-3.5 bg-amber-50/90 border border-amber-300 rounded-xl text-amber-950 flex items-start gap-3 animate-fade-in text-xs">
+              <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-900">
+                  Aviso: Manutenção Técnica Programada neste Laboratório
+                </p>
+                <p className="text-[11px] text-amber-800 mt-0.5">
+                  O {selectedLab.name} está disponível para o horário selecionado ({formatDateBR(date)}), mas possui manutenção programada para:{' '}
+                  <strong>{labMaintenanceInfo.formattedPeriod}</strong> ({labMaintenanceInfo.reason || 'Manutenção programada'}).
                 </p>
               </div>
             </div>
@@ -609,6 +670,19 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                 </span>
               )}
             </div>
+
+            {/* Observações deste Lab */}
+            {selectedLab.notes && selectedLab.notes.trim() && (
+              <div className="pt-2 border-t border-slate-200/60 flex items-start gap-2 text-xs">
+                <div className="flex items-center gap-1 font-bold text-[11px] text-blue-800 shrink-0 mt-0.5">
+                  <FileText className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Observações:</span>
+                </div>
+                <div className="text-[11px] text-slate-700 flex-1 whitespace-pre-wrap leading-relaxed">
+                  {selectedLab.notes}
+                </div>
+              </div>
+            )}
 
             {/* Softwares Disponíveis neste Lab */}
             <div className="pt-2 border-t border-slate-200/60 flex items-start gap-2">

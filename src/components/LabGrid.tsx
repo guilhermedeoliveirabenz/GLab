@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Lab, LAB_LIST, Booking } from '../types';
-import { Monitor, Truck, Calendar, Clock, Search, Code, Wrench, Bell } from 'lucide-react';
+import { Monitor, Truck, Calendar, Clock, Search, Code, Wrench, Bell, Info, FileText } from 'lucide-react';
+import { getLabMaintenanceStatus } from '../lib/maintenanceUtils';
 
 interface LabGridProps {
   bookings: Booking[];
@@ -17,9 +18,6 @@ export const LabGrid: React.FC<LabGridProps> = ({
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [filterType, setFilterType] = useState<'all' | 'fixed' | 'mobile'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Total de máquinas em toda a escola
-  const totalMachines = labs.reduce((acc, l) => acc + l.capacity, 0);
 
   const filteredLabs = labs.filter((lab) => {
     if (filterType === 'fixed' && lab.isMobile) return false;
@@ -39,32 +37,6 @@ export const LabGrid: React.FC<LabGridProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Banner with Key Lab Numbers */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <p className="text-xs text-slate-700 font-medium">Total de Laboratórios</p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">12 Unidades</p>
-          <p className="text-[11px] text-slate-600 mt-0.5">8 Fixos • 4 Móveis</p>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <p className="text-xs text-slate-700 font-medium">Parque de Máquinas</p>
-          <p className="text-2xl font-bold text-blue-700 mt-1">{totalMachines} Computadores</p>
-          <p className="text-[11px] text-slate-600 mt-0.5">Disponíveis na escola</p>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <p className="text-xs text-slate-700 font-medium">Carrinhos Móveis</p>
-          <p className="text-2xl font-bold text-rose-700 mt-1">113 Notebooks</p>
-          <p className="text-[11px] text-slate-600 mt-0.5">Entrega direta em sala</p>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <p className="text-xs text-slate-700 font-medium">Reservas no Dia</p>
-          <p className="text-2xl font-bold text-emerald-700 mt-1">
-            {bookings.filter((b) => b.date === selectedDate && b.status !== 'cancelled').length} Aulas
-          </p>
-          <p className="text-[11px] text-slate-600 mt-0.5">Para a data selecionada</p>
-        </div>
-      </div>
-
       {/* Control Bar: Date selection & Filter */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         {/* Date Filter */}
@@ -98,35 +70,35 @@ export const LabGrid: React.FC<LabGridProps> = ({
             <button
               id="filter-labs-all-btn"
               onClick={() => setFilterType('all')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
                 filterType === 'all'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Todos (12)
+              Todos ({labs.length})
             </button>
             <button
               id="filter-labs-fixed-btn"
               onClick={() => setFilterType('fixed')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
                 filterType === 'fixed'
                   ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Fixos (8)
+              Fixos ({labs.filter((l) => !l.isMobile).length})
             </button>
             <button
               id="filter-labs-mobile-btn"
               onClick={() => setFilterType('mobile')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
                 filterType === 'mobile'
                   ? 'bg-white text-rose-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Móveis (4)
+              Móveis ({labs.filter((l) => l.isMobile).length})
             </button>
           </div>
         </div>
@@ -139,7 +111,9 @@ export const LabGrid: React.FC<LabGridProps> = ({
           const dayBookings = bookings.filter(
             (b) => b.labId === lab.id && b.date === selectedDate && b.status !== 'cancelled',
           );
-          const isUnderMaint = Boolean(lab.isUnderMaintenance);
+          const maintStatus = getLabMaintenanceStatus(lab, selectedDate);
+          const isUnderMaint = maintStatus.isUnderMaintenance;
+          const isFutureMaint = !isUnderMaint && maintStatus.isScheduledFuture;
           const hasMessage = Boolean(lab.broadcastMessage?.trim());
 
           return (
@@ -174,15 +148,19 @@ export const LabGrid: React.FC<LabGridProps> = ({
                       )}
                     </div>
                     <div>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="font-bold text-slate-900 text-base leading-tight">
                           {lab.name}
                         </h3>
-                        {isUnderMaint && (
+                        {isUnderMaint ? (
                           <span className="text-[9px] font-bold bg-rose-600 text-white px-1.5 py-0.5 rounded-sm">
                             Manutenção
                           </span>
-                        )}
+                        ) : isFutureMaint ? (
+                          <span className="text-[9px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded-sm">
+                            Manut. Agendada
+                          </span>
+                        ) : null}
                       </div>
                       <span className="text-[11px] text-slate-600">
                         {lab.isMobile ? 'Laboratório Móvel' : 'Laboratório Fixo'}
@@ -197,16 +175,29 @@ export const LabGrid: React.FC<LabGridProps> = ({
                   </span>
                 </div>
 
-                {/* Banner de Manutenção */}
+                {/* Banner de Manutenção para a Data Selecionada */}
                 {isUnderMaint && (
                   <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs flex items-start gap-2">
                     <Wrench className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                     <div>
                       <p className="font-bold text-rose-800">Fechado para Manutenção</p>
                       <p className="text-[11px] text-rose-700 mt-0.5">
-                        {lab.maintenanceReason || 'Em manutenção técnica.'}
+                        {maintStatus.formattedPeriod}
+                      </p>
+                      <p className="text-[11px] text-rose-800 font-medium mt-0.5">
+                        Motivo: {maintStatus.reason || 'Em manutenção técnica.'}
                       </p>
                     </div>
+                  </div>
+                )}
+
+                {/* Aviso de Manutenção Futura */}
+                {isFutureMaint && (
+                  <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px] flex items-start gap-1.5">
+                    <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                    <p>
+                      <strong>Manutenção agendada:</strong> {maintStatus.formattedPeriod}
+                    </p>
                   </div>
                 )}
 
@@ -224,6 +215,19 @@ export const LabGrid: React.FC<LabGridProps> = ({
                 )}
 
                 <p className="text-xs text-slate-600 mb-3 line-clamp-2">{lab.description}</p>
+
+                {/* Observações do Laboratório */}
+                {lab.notes && lab.notes.trim() && (
+                  <div className="mb-3 p-2.5 bg-blue-50/70 border border-blue-200/80 rounded-xl text-xs flex items-start gap-2">
+                    <FileText className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-blue-900 text-[11px]">Observações:</p>
+                      <p className="text-[11px] text-blue-950 mt-0.5 leading-snug whitespace-pre-wrap">
+                        {lab.notes}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Softwares Disponíveis no Lab */}
                 <div className="mb-4 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
@@ -308,9 +312,9 @@ export const LabGrid: React.FC<LabGridProps> = ({
               {/* Botão de Agendamento */}
               <div className="p-4 bg-slate-50 border-t border-slate-100">
                 {isUnderMaint ? (
-                  <div className="w-full py-2 px-3 text-xs font-semibold text-rose-700 bg-rose-50/80 border border-rose-200 rounded-xl flex items-center justify-center gap-1.5">
-                    <Wrench className="w-3.5 h-3.5 text-rose-600" />
-                    <span>Em Manutenção Técnica</span>
+                  <div className="w-full py-2 px-3 text-xs font-semibold text-rose-700 bg-rose-50/80 border border-rose-200 rounded-xl flex items-center justify-center gap-1.5 text-center">
+                    <Wrench className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span className="truncate">Em Manutenção ({maintStatus.formattedPeriod})</span>
                   </div>
                 ) : (
                   <button

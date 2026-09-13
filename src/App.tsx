@@ -122,24 +122,19 @@ function AppContent() {
       <section className="bg-white border-b border-slate-200 py-6 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-                <Sparkles className="w-3 h-3 text-blue-600" />
-                Sistema Integrado ao Firebase Firestore
-              </span>
-              {isAdmin && (
+            {isAdmin && (
+              <div className="flex items-center gap-2 mb-2">
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
                   <Shield className="w-3 h-3 text-amber-600" />
                   Modo Administrador Ativo
                 </span>
-              )}
-            </div>
+              </div>
+            )}
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
               Gestão de Laboratórios de Informática
             </h1>
             <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-3xl">
-              Agendamento de 8 laboratórios fixos e 4 carrinhos móveis com indicação obrigatória de
-              sala e envio instantâneo de confirmação pelo WhatsApp do professor.
+              Agendamento de laboratórios fixos e carrinhos móveis com indicação de sala e envio instantâneo de confirmação pelo WhatsApp do professor.
             </p>
           </div>
 
@@ -250,11 +245,9 @@ function AppContent() {
             © {new Date().getFullYear()} Sistema Escolar de Gestão de Laboratórios de Informática - CTI/UNASP-HT
           </p>
           <div className="flex items-center gap-4 text-slate-600">
-            <span>12 Laboratórios Registrados</span>
+            <span>{labs.length} Laboratórios Registrados</span>
             <span>•</span>
-            <span>478 Máquinas Totais</span>
-            <span>•</span>
-            <span>Sincronização Firebase Firestore</span>
+            <span>{labs.reduce((acc, l) => acc + (l.capacity || 0), 0)} Máquinas Totais</span>
           </div>
         </div>
       </footer>

@@ -2,6 +2,12 @@ import React, { useState } from 'react';
 import { Booking, LAB_LIST, Lab } from '../types';
 import { formatDateBR } from '../lib/whatsapp';
 import {
+  getLabMaintenanceStatus,
+  formatMaintenancePeriod,
+  doTimesOverlap,
+  LabMaintenanceCheckResult,
+} from '../lib/maintenanceUtils';
+import {
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
@@ -42,11 +48,37 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   const [activeBookingModal, setActiveBookingModal] = useState<Booking | null>(null);
   const [selectedMaintenanceLabModal, setSelectedMaintenanceLabModal] = useState<Lab | null>(null);
 
-  // Laboratórios em manutenção
+  // Laboratórios com manutenção cadastrada
   const maintenanceLabs = labs.filter((l) => l.isUnderMaintenance);
   const activeMaintenanceLabs = maintenanceLabs.filter(
     (l) => selectedLabId === 'all' || l.id === selectedLabId,
   );
+
+  // Verifica se o horário da manutenção colide com o turno selecionado no filtro
+  const doesMaintenanceOverlapShift = (status: LabMaintenanceCheckResult, shift: string): boolean => {
+    if (shift === 'all') return true;
+    if (status.allDay) return true;
+    const shiftTimes: Record<string, [string, string]> = {
+      manha: ['07:00', '12:00'],
+      tarde: ['13:00', '18:00'],
+      noite: ['18:30', '22:30'],
+    };
+    const [shiftStart, shiftEnd] = shiftTimes[shift] || ['00:00', '23:59'];
+    return doTimesOverlap(status.startTime, status.endTime, shiftStart, shiftEnd);
+  };
+
+  // Retorna os laboratórios em manutenção especificamente para a data fornecida
+  const getMaintenanceForDate = (dateStr: string) => {
+    return labs
+      .filter((l) => selectedLabId === 'all' || l.id === selectedLabId)
+      .map((l) => ({
+        lab: l,
+        status: getLabMaintenanceStatus(l, dateStr),
+      }))
+      .filter(
+        ({ status }) => status.isUnderMaintenance && doesMaintenanceOverlapShift(status, selectedShift),
+      );
+  };
 
   // Filtragem dos agendamentos
   const filteredBookings = bookings.filter((b) => {
@@ -308,23 +340,29 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
 
       {/* Banner de Laboratórios em Manutenção */}
       {maintenanceLabs.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-950 shadow-2xs">
+        <div className="bg-amber-50/95 border border-amber-300/80 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-950 shadow-2xs">
           <div className="flex items-start sm:items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-800 shrink-0 mt-0.5 sm:mt-0">
               <Wrench className="w-4 h-4 animate-pulse" />
             </div>
             <div>
-              <span className="font-bold block sm:inline text-amber-900">
-                Atenção: {maintenanceLabs.length} {maintenanceLabs.length === 1 ? 'Laboratório em Manutenção' : 'Laboratórios em Manutenção'}
+              <span className="font-bold block sm:inline text-amber-950">
+                {maintenanceLabs.length} {maintenanceLabs.length === 1 ? 'Laboratório com Manutenção Programada' : 'Laboratórios com Manutenção Programada'}
               </span>
-              <p className="text-[11px] text-amber-800 mt-0.5">
-                {maintenanceLabs.map((l) => `${l.name}${l.maintenanceReason ? ` (${l.maintenanceReason})` : ''}`).join(' • ')}
-              </p>
+              <div className="text-[11px] text-amber-800 mt-0.5 space-y-0.5">
+                {maintenanceLabs.map((l) => (
+                  <div key={l.id} className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-bold text-amber-950">{l.name}:</span>
+                    <span>{formatMaintenancePeriod(l)}</span>
+                    {l.maintenanceReason && <span className="text-amber-700 italic">({l.maintenanceReason})</span>}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 self-end sm:self-center">
-            <span className="text-[11px] bg-amber-200/80 text-amber-900 px-2.5 py-1 rounded-lg font-bold">
-              Bloqueado para novas reservas
+          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+            <span className="text-[11px] bg-amber-200/80 text-amber-950 px-2.5 py-1 rounded-lg font-bold border border-amber-300">
+              Bloqueado nos dias/turnos definidos
             </span>
           </div>
         </div>
@@ -406,20 +444,26 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
 
                   {/* Eventos e Manutenções do dia */}
                   <div className="flex-1 space-y-1 overflow-y-auto max-h-[85px] sm:max-h-[105px] pr-0.5">
-                    {/* Laboratórios em manutenção fixos */}
+                    {/* Laboratórios em manutenção específicos deste dia */}
                     {dayObj.isCurrentMonth &&
-                      activeMaintenanceLabs.map((mLab) => (
+                      getMaintenanceForDate(dayObj.dateStr).map(({ lab: mLab, status: mStatus }) => (
                         <div
                           key={`maint-${mLab.id}-${dayObj.dateStr}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedMaintenanceLabModal(mLab);
                           }}
-                          className="w-full text-left px-1.5 py-0.5 text-[10px] sm:text-[11px] rounded font-bold border truncate flex items-center gap-1 bg-amber-100 text-amber-950 border-amber-300 shadow-2xs hover:bg-amber-200 transition-all cursor-pointer"
-                          title={`🛠️ ${mLab.name} - Em Manutenção: ${mLab.maintenanceReason || 'Reparos técnicos'}`}
+                          className={`w-full text-left px-1.5 py-0.5 text-[10px] sm:text-[11px] rounded font-bold border truncate flex items-center gap-1 shadow-2xs transition-all cursor-pointer ${
+                            mStatus.allDay
+                              ? 'bg-rose-100 text-rose-950 border-rose-300 hover:bg-rose-200'
+                              : 'bg-amber-100 text-amber-950 border-amber-300 hover:bg-amber-200'
+                          }`}
+                          title={`🛠️ Interdição Técnica: ${mLab.name} (${mStatus.allDay ? 'Dia todo' : `${mStatus.startTime} às ${mStatus.endTime}`}) - Motivo: ${mStatus.reason}`}
                         >
-                          <Wrench className="w-2.5 h-2.5 text-amber-700 shrink-0 animate-pulse" />
-                          <span className="truncate">{mLab.name} (Manut.)</span>
+                          <Wrench className={`w-2.5 h-2.5 shrink-0 ${mStatus.allDay ? 'text-rose-700' : 'text-amber-700'}`} />
+                          <span className="truncate">
+                            {mStatus.allDay ? `${mLab.name} (Dia todo)` : `${mStatus.startTime}-${mStatus.endTime} ${mLab.name}`}
+                          </span>
                         </div>
                       ))}
 
@@ -468,7 +512,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                       </button>
                     )}
 
-                    {dayBookings.length === 0 && activeMaintenanceLabs.length === 0 && dayObj.isCurrentMonth && (
+                    {dayBookings.length === 0 && getMaintenanceForDate(dayObj.dateStr).length === 0 && dayObj.isCurrentMonth && (
                       <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity py-2">
                         <span className="text-[10px] text-blue-600 font-medium flex items-center gap-1">
                           <Plus className="w-3 h-3" /> Clique p/ Agendar
@@ -530,33 +574,43 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                     className="p-2 space-y-2 bg-slate-50/20 hover:bg-blue-50/20 transition-colors cursor-pointer flex flex-col justify-start"
                     title={`Clique para agendar aula em ${formatDateBR(dayObj.dateStr)}`}
                   >
-                    {/* Laboratórios em manutenção nesta coluna */}
-                    {activeMaintenanceLabs.map((mLab) => (
+                    {/* Laboratórios em manutenção nesta data específica */}
+                    {getMaintenanceForDate(dayObj.dateStr).map(({ lab: mLab, status: mStatus }) => (
                       <div
                         key={`week-maint-${mLab.id}-${dayObj.dateStr}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedMaintenanceLabModal(mLab);
                         }}
-                        className="p-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 text-xs space-y-1 shadow-2xs hover:bg-amber-100 transition-colors cursor-pointer"
+                        className={`p-2 rounded-xl border text-xs space-y-1 shadow-2xs transition-colors cursor-pointer ${
+                          mStatus.allDay
+                            ? 'border-rose-300 bg-rose-50 text-rose-950 hover:bg-rose-100'
+                            : 'border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100'
+                        }`}
                         title={`Clique para ver detalhes da manutenção`}
                       >
                         <div className="flex items-center justify-between gap-1">
-                          <span className="font-bold truncate text-[11px] flex items-center gap-1 text-amber-900">
-                            <Wrench className="w-3 h-3 text-amber-600 shrink-0" />
+                          <span className={`font-bold truncate text-[11px] flex items-center gap-1 ${mStatus.allDay ? 'text-rose-900' : 'text-amber-900'}`}>
+                            <Wrench className={`w-3 h-3 shrink-0 ${mStatus.allDay ? 'text-rose-600' : 'text-amber-600'}`} />
                             {mLab.name}
                           </span>
-                          <span className="text-[9px] bg-amber-200 text-amber-900 font-bold px-1.5 py-0.5 rounded-full">
-                            Manutenção
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                            mStatus.allDay ? 'bg-rose-200 text-rose-900' : 'bg-amber-200 text-amber-900'
+                          }`}>
+                            {mStatus.allDay ? 'Dia Todo' : `${mStatus.startTime} - ${mStatus.endTime}`}
                           </span>
                         </div>
-                        <p className="text-[10px] text-amber-800 line-clamp-2">
-                          {mLab.maintenanceReason || 'Em reparos técnicos'}
+                        <div className="text-[10px] flex items-center gap-1 text-slate-700 font-medium">
+                          <Clock className="w-2.5 h-2.5 text-slate-400" />
+                          <span>{mStatus.allDay ? 'Interdição em todos os turnos' : `Das ${mStatus.startTime} às ${mStatus.endTime}`}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-600 line-clamp-2">
+                          {mStatus.reason || 'Em reparos técnicos'}
                         </p>
                       </div>
                     ))}
 
-                    {dayBookings.length === 0 && activeMaintenanceLabs.length === 0 ? (
+                    {dayBookings.length === 0 && getMaintenanceForDate(dayObj.dateStr).length === 0 ? (
                       <div className="h-full min-h-[140px] flex flex-col items-center justify-center text-center p-3 rounded-xl border border-dashed border-slate-200 hover:border-blue-400 hover:bg-blue-50/40 transition-colors">
                         <Plus className="w-4 h-4 text-slate-300 group-hover:text-blue-600 mb-1" />
                         <span className="text-[11px] text-slate-400 group-hover:text-blue-700 font-medium">
@@ -646,41 +700,60 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
 
           <div className="p-4 sm:p-5 space-y-5">
             {/* Laboratórios em manutenção no dia selecionado */}
-            {activeMaintenanceLabs.length > 0 && (
-              <div className="space-y-2.5">
-                <h4 className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                  <Wrench className="w-4 h-4 text-amber-600" />
-                  <span>Laboratório(s) em Manutenção neste Dia ({activeMaintenanceLabs.length}):</span>
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {activeMaintenanceLabs.map((mLab) => (
-                    <div
-                      key={`day-maint-${mLab.id}`}
-                      onClick={() => setSelectedMaintenanceLabModal(mLab)}
-                      className="p-3.5 rounded-xl border border-amber-300 bg-amber-50/90 hover:bg-amber-100 transition-colors cursor-pointer flex items-start gap-3"
-                    >
-                      <div className="w-9 h-9 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center shrink-0">
-                        <Wrench className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 min-w-0 text-xs">
-                        <div className="flex items-center justify-between gap-1 mb-1">
-                          <strong className="text-slate-900 text-sm">{mLab.name}</strong>
-                          <span className="text-[10px] bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded-full">
-                            Interditado
-                          </span>
+            {(() => {
+              const currentDayMaintenance = getMaintenanceForDate(currentDateStr);
+              if (currentDayMaintenance.length === 0) return null;
+
+              return (
+                <div className="space-y-2.5">
+                  <h4 className="text-xs font-bold text-rose-900 flex items-center gap-1.5">
+                    <Wrench className="w-4 h-4 text-rose-600" />
+                    <span>Interdição para Manutenção neste Dia ({currentDayMaintenance.length}):</span>
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {currentDayMaintenance.map(({ lab: mLab, status: mStatus }) => (
+                      <div
+                        key={`day-maint-${mLab.id}`}
+                        onClick={() => setSelectedMaintenanceLabModal(mLab)}
+                        className={`p-3.5 rounded-xl border transition-colors cursor-pointer flex items-start gap-3 ${
+                          mStatus.allDay
+                            ? 'border-rose-300 bg-rose-50/90 hover:bg-rose-100 text-rose-950'
+                            : 'border-amber-300 bg-amber-50/90 hover:bg-amber-100 text-amber-950'
+                        }`}
+                      >
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                          mStatus.allDay ? 'bg-rose-200 text-rose-900' : 'bg-amber-200 text-amber-900'
+                        }`}>
+                          <Wrench className="w-4 h-4" />
                         </div>
-                        <p className="text-amber-900 text-[11px]">
-                          <strong>Motivo:</strong> {mLab.maintenanceReason || 'Em reparos técnicos pela equipe de suporte'}
-                        </p>
-                        <p className="text-slate-500 text-[10px] mt-1">
-                          Indisponível para novos agendamentos até a conclusão dos serviços técnicos.
-                        </p>
+                        <div className="flex-1 min-w-0 text-xs">
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <strong className="text-slate-900 text-sm">{mLab.name}</strong>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              mStatus.allDay ? 'bg-rose-200 text-rose-900' : 'bg-amber-200 text-amber-900'
+                            }`}>
+                              {mStatus.allDay ? 'Dia Todo' : `${mStatus.startTime} às ${mStatus.endTime}`}
+                            </span>
+                          </div>
+                          <p className="text-slate-700 text-[11px] font-medium flex items-center gap-1 mb-1">
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            <span>
+                              <strong>Horário interditado:</strong> {mStatus.allDay ? 'Dia Inteiro (Todos os turnos)' : `Das ${mStatus.startTime} às ${mStatus.endTime}`}
+                            </span>
+                          </p>
+                          <p className="text-slate-800 text-[11px]">
+                            <strong>Motivo:</strong> {mStatus.reason || 'Em reparos técnicos pela equipe de suporte'}
+                          </p>
+                          <p className="text-slate-500 text-[10px] mt-1">
+                            Período total agendado: {mStatus.formattedPeriod}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {filteredBookings.filter((b) => b.date === currentDateStr).length === 0 ? (
               <div className="text-center py-12">
@@ -691,7 +764,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                   Nenhum agendamento neste dia
                 </h3>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-                  {activeMaintenanceLabs.length > 0
+                  {getMaintenanceForDate(currentDateStr).length > 0
                     ? 'Os demais laboratórios estão disponíveis para uso nesta data.'
                     : 'Todos os laboratórios estão disponíveis para uso nesta data.'}
                 </p>
@@ -924,6 +997,25 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                   <span className="text-[11px] text-slate-400 block font-medium">Tipo</span>
                   <span className="font-bold text-slate-800 capitalize">
                     {selectedMaintenanceLabModal.type === 'mobile' ? 'Carrinho Móvel' : 'Laboratório Fixo'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Período e Horário Programados */}
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-1.5 text-rose-950">
+                <div className="flex items-center gap-1.5 font-bold text-xs text-rose-900">
+                  <CalendarIcon className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Período da Interdição:</span>
+                </div>
+                <p className="text-xs font-semibold text-rose-950">
+                  {formatMaintenancePeriod(selectedMaintenanceLabModal)}
+                </p>
+                <div className="flex items-center gap-1.5 text-[11px] text-rose-800 font-medium pt-0.5">
+                  <Clock className="w-3 h-3 text-rose-600" />
+                  <span>
+                    Horário: {selectedMaintenanceLabModal.maintenanceAllDay !== false
+                      ? 'Dia inteiro (todos os turnos)'
+                      : `Das ${selectedMaintenanceLabModal.maintenanceStartTime || '07:30'} às ${selectedMaintenanceLabModal.maintenanceEndTime || '17:40'}`}
                   </span>
                 </div>
               </div>
