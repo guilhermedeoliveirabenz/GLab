@@ -50,11 +50,15 @@ export function formatDateBR(dateStr: string): string {
 export function generateWhatsAppMessage(booking: Booking, customAdminNote?: string): string {
   const formattedDate = formatDateBR(booking.date);
 
+  const rawTeacher = booking.teacherName?.trim();
+  const cleanTeacher = rawTeacher ? rawTeacher.replace(/^Prof\.?\s*/i, '').trim() : 'Guilherme Benz';
+  const teacherName = cleanTeacher || 'Guilherme Benz';
+
   const lines = [
     `*CONFIRMAÇÃO DE AGENDAMENTO DE LABORATÓRIO* 🏫`,
     ``,
-    `Olá, *Prof. ${booking.teacherName}*!`,
-    `Informamos que o seu agendamento foi *APROVADO E CONFIRMADO* com sucesso pela administração escolar.`,
+    `Olá, *Prof. ${teacherName}*!`,
+    `Informamos que o seu agendamento foi *APROVADO E CONFIRMADO* com sucesso pelo departamento de TI.`,
     ``,
     `📋 *DETALHES DA RESERVA:*`,
     `🖥️ *Laboratório:* ${booking.labName}`,

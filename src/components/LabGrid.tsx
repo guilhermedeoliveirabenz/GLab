@@ -271,9 +271,9 @@ export const LabGrid: React.FC<LabGridProps> = ({
 
                   {dayBookings.length > 0 ? (
                     <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
-                      {dayBookings.map((b) => (
+                      {dayBookings.map((b, bIdx) => (
                         <div
-                          key={b.id}
+                          key={`${b.id}-${bIdx}`}
                           className={`p-2 rounded-lg text-[11px] border ${
                             b.status === 'confirmed'
                               ? 'bg-emerald-50/60 border-emerald-200 text-emerald-900'

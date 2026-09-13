@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Booking, LAB_LIST, Lab, RecurrenceType, Technician } from '../types';
+import { Booking, LAB_LIST, Lab, RecurrenceType } from '../types';
 import { checkBookingConflict, createBooking, createRecurringBookings } from '../lib/bookingService';
-import { generateRecurrenceDates } from '../lib/recurrenceUtils';
-import { subscribeToTechnicians, getTechniciansForLab } from '../lib/technicianService';
-import { generateTechnicianAlertWhatsAppMessage, getWhatsAppSendUrl } from '../lib/whatsapp';
+import {
+  generateRecurrenceDates,
+  generateRecurrenceDatesUntilEndDate,
+  calculateEndDateFromCount,
+} from '../lib/recurrenceUtils';
+import { formatDateBR } from '../lib/whatsapp';
 import { useAuth } from '../lib/authContext';
 import {
   Calendar,
@@ -18,8 +21,6 @@ import {
   FileText,
   CheckCircle2,
   AlertTriangle,
-  Send,
-  Sparkles,
   Laptop,
   Code,
   Wrench,
@@ -29,9 +30,6 @@ import {
   CalendarDays,
   Check,
   X,
-  Copy,
-  ExternalLink,
-  MessageSquare,
 } from 'lucide-react';
 import { playBookingSuccessSound } from '../lib/soundUtils';
 
@@ -50,7 +48,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   preselectedDate,
   onBookingCreated,
 }) => {
-  const { teacherSession } = useAuth();
+  const { teacherSession, loginTeacher } = useAuth();
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const defaultDate = preselectedDate || tomorrow.toISOString().split('T')[0];
@@ -73,6 +71,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceType>('weekly');
   const [recurrenceCount, setRecurrenceCount] = useState<number>(4);
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState<string>(() => {
+    return calculateEndDateFromCount(defaultDate, 'weekly', 4, true);
+  });
   const [skipWeekends, setSkipWeekends] = useState(true);
   const [showRecurrenceModal, setShowRecurrenceModal] = useState(false);
   const [calculatedDates, setCalculatedDates] = useState<string[]>([]);
@@ -82,18 +83,6 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [successBooking, setSuccessBooking] = useState<Booking | null>(null);
   const [recurringSuccessCount, setRecurringSuccessCount] = useState<number | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
-
-  // Technicians subscription for notification dispatch
-  const [technicians, setTechnicians] = useState<Technician[]>([]);
-  const [copiedTechMessage, setCopiedTechMessage] = useState(false);
-  const [customTechPhone, setCustomTechPhone] = useState('');
-
-  useEffect(() => {
-    const unsub = subscribeToTechnicians((list) => {
-      setTechnicians(list);
-    });
-    return () => unsub();
-  }, []);
 
   // Sync session if teacher is logged in
   useEffect(() => {
@@ -106,6 +95,25 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       }
     }
   }, [teacherSession]);
+
+  // Sincroniza quando o usuário clica em uma data no calendário
+  useEffect(() => {
+    if (preselectedDate) {
+      setDate(preselectedDate);
+      setRecurrenceEndDate(calculateEndDateFromCount(preselectedDate, recurrenceFrequency, recurrenceCount, skipWeekends));
+    }
+  }, [preselectedDate, recurrenceFrequency, recurrenceCount, skipWeekends]);
+
+  // Sincroniza quando um lab pré-selecionado é fornecido
+  useEffect(() => {
+    if (preselectedLabId) {
+      setLabId(preselectedLabId);
+      const lab = labs.find((l) => l.id === preselectedLabId);
+      if (lab) {
+        setRequestedMachines(lab.capacity);
+      }
+    }
+  }, [preselectedLabId, labs]);
 
   // Adjust machines when selected lab changes
   const handleLabChange = (newLabId: string) => {
@@ -122,8 +130,22 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const hasLabBroadcastMessage = Boolean(selectedLab?.broadcastMessage?.trim());
 
   // Helper to check conflict across dates
-  const prepareRecurrenceDates = () => {
-    const dates = generateRecurrenceDates(date, recurrenceFrequency, recurrenceCount, skipWeekends);
+  const prepareRecurrenceDates = (
+    customStart?: string,
+    customEnd?: string,
+    customFreq?: RecurrenceType,
+  ) => {
+    const sDate = customStart || date;
+    const eDate = customEnd !== undefined ? customEnd : recurrenceEndDate;
+    const freq = customFreq || recurrenceFrequency;
+
+    let dates: string[] = [];
+    if (eDate && eDate >= sDate) {
+      dates = generateRecurrenceDatesUntilEndDate(sDate, eDate, freq, skipWeekends);
+    } else {
+      dates = generateRecurrenceDates(sDate, freq, recurrenceCount, skipWeekends);
+    }
+
     setCalculatedDates(dates);
 
     const cleanLabel = scheduleLabel.trim();
@@ -168,6 +190,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     }
     if (!startTime || !endTime || startTime >= endTime) {
       setConflictError('Verifique os horários de início e término.');
+      return;
+    }
+    if (isRecurring && recurrenceEndDate && recurrenceEndDate < date) {
+      setConflictError('A Data Final da Recorrência não pode ser anterior à Data Inicial.');
       return;
     }
 
@@ -218,6 +244,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
       if (createdList.length > 0) {
         playBookingSuccessSound();
+        loginTeacher(whatsapp.trim(), teacherName.trim());
         setSuccessBooking(createdList[0]);
         setRecurringSuccessCount(createdList.length);
         onBookingCreated?.(createdList[0]);
@@ -243,7 +270,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     }
 
     // Se estiver com recorrência ativada, aciona o modal de confirmação com visualização de todas as datas
-    if (isRecurring && recurrenceFrequency !== 'none' && recurrenceCount > 1) {
+    if (isRecurring && recurrenceFrequency !== 'none') {
       handleOpenRecurrenceConfirmation();
       return;
     }
@@ -334,6 +361,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       });
 
       playBookingSuccessSound();
+      loginTeacher(whatsapp.trim(), teacherName.trim());
       setSuccessBooking(created);
       setRecurringSuccessCount(null);
       onBookingCreated?.(created);
@@ -358,9 +386,6 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   };
 
   if (successBooking) {
-    const assignedTechs = getTechniciansForLab(technicians, successBooking.labId);
-    const techsWithPhone = assignedTechs.filter((t) => t.phone && t.phone.trim().length >= 8);
-
     return (
       <div
         id="booking-success-card"
@@ -372,20 +397,14 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
         <h3 className="text-2xl font-bold text-slate-900 mb-1">
           {recurringSuccessCount
-            ? `Agendamento Recorrente Registrado (${recurringSuccessCount} aulas)!`
-            : 'Solicitação de Agendamento Enviada!'}
+            ? `Pedido Enviado (${recurringSuccessCount} aulas)!`
+            : 'Pedido Enviado com Sucesso!'}
         </h3>
-        <p className="text-sm text-slate-600 mb-4">
+        <p className="text-sm text-slate-600 mb-6">
           {recurringSuccessCount
-            ? `As ${recurringSuccessCount} datas foram agendadas no sistema e aguardam aprovação do técnico/administrador.`
-            : 'Seu pedido foi registrado no sistema escolar e está aguardando a confirmação do administrador.'}
+            ? `Seu pedido de agendamento recorrente (${recurringSuccessCount} datas) foi enviado e está registrado no sistema.`
+            : 'Seu pedido de agendamento foi enviado com sucesso e está registrado no sistema.'}
         </p>
-
-        {/* Confirmação de persistência no Firestore */}
-        <div className="flex items-center justify-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-medium mb-6">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>Gravado no banco de dados Firestore em tempo real (visível para a equipe de TI).</span>
-        </div>
 
         {/* Resumo do Agendamento */}
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left text-sm space-y-2 mb-6">
@@ -433,118 +452,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             </div>
           )}
           <div className="flex justify-between pt-1">
-            <span className="text-slate-500">Status atual:</span>
+            <span className="text-slate-500">Status do pedido:</span>
             <span className="inline-flex items-center gap-1 font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full text-xs border border-amber-200">
               Aguardando Confirmação
-            </span>
-          </div>
-        </div>
-
-        {/* Card Especial: Notificação para o Técnico no WhatsApp */}
-        <div className="bg-emerald-50/70 border border-emerald-300 rounded-xl p-5 text-left mb-6 space-y-3">
-          <div className="flex items-center gap-2.5 pb-2 border-b border-emerald-200">
-            <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white shrink-0">
-              <Send className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="font-bold text-emerald-950 text-sm">Avisar Técnico / Suporte pelo WhatsApp</h4>
-              <p className="text-[11px] text-emerald-800">
-                Dispare uma mensagem instantânea para a equipe técnica agilizar a liberação da sala
-              </p>
-            </div>
-          </div>
-
-          {techsWithPhone.length > 0 ? (
-            <div className="space-y-2 pt-1">
-              <p className="text-xs font-semibold text-slate-700">Técnicos responsáveis por este laboratório:</p>
-              {techsWithPhone.map((tech) => {
-                const techMsg = generateTechnicianAlertWhatsAppMessage(successBooking, tech.name);
-                const waUrl = getWhatsAppSendUrl(tech.phone || '', techMsg);
-                return (
-                  <div
-                    key={tech.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-white border border-emerald-200 rounded-lg shadow-2xs"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-800 text-sm">{tech.name}</span>
-                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-semibold">
-                          {tech.role === 'admin' ? 'Administrador' : 'Técnico de TI'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-emerald-700 font-mono font-medium mt-0.5">📱 {tech.phone}</p>
-                    </div>
-                    <a
-                      href={waUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Avisar {tech.name.split(' ')[0]} no WhatsApp</span>
-                      <ExternalLink className="w-3 h-3 opacity-75" />
-                    </a>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="space-y-2 pt-1">
-              <p className="text-xs text-slate-700">
-                Informe o WhatsApp do técnico de TI da sua escola para enviar os dados da reserva:
-              </p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="tel"
-                  placeholder="DDD + Número (ex: 11987654321)"
-                  value={customTechPhone}
-                  onChange={(e) => setCustomTechPhone(e.target.value)}
-                  className="flex-1 px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                />
-                <button
-                  type="button"
-                  disabled={!customTechPhone.trim()}
-                  onClick={() => {
-                    const techMsg = generateTechnicianAlertWhatsAppMessage(successBooking);
-                    const url = getWhatsAppSendUrl(customTechPhone, techMsg);
-                    window.open(url, '_blank', 'noopener,noreferrer');
-                  }}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Enviar para Técnico</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Opção de Copiar Mensagem de Aviso */}
-          <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-emerald-200/70 text-xs">
-            <button
-              type="button"
-              onClick={async () => {
-                const techMsg = generateTechnicianAlertWhatsAppMessage(successBooking);
-                await navigator.clipboard.writeText(techMsg);
-                setCopiedTechMessage(true);
-                setTimeout(() => setCopiedTechMessage(false), 2500);
-              }}
-              className="inline-flex items-center gap-1.5 text-emerald-800 hover:text-emerald-950 font-medium py-1 px-2 rounded-md hover:bg-emerald-100/70 transition-colors cursor-pointer"
-            >
-              {copiedTechMessage ? (
-                <>
-                  <Check className="w-4 h-4 text-emerald-700" />
-                  <span className="text-emerald-900 font-bold">Mensagem copiada com sucesso!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-4 h-4 text-emerald-700" />
-                  <span>Copiar texto de notificação para colar em grupo ou conversa</span>
-                </>
-              )}
-            </button>
-            <span className="text-[11px] text-slate-500 flex items-center gap-1">
-              <Bell className="w-3 h-3 text-amber-500" />
-              Alerta em tempo real ativo no painel
             </span>
           </div>
         </div>
@@ -1001,45 +911,120 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           </div>
 
           {isRecurring && (
-            <div className="pt-3 border-t border-indigo-200/60 grid grid-cols-1 sm:grid-cols-3 gap-3 animate-fade-in">
-              <div>
-                <label className="block text-xs font-semibold text-indigo-950 mb-1">
-                  Frequência da Repetição:
-                </label>
-                <select
-                  value={recurrenceFrequency}
-                  onChange={(e) => setRecurrenceFrequency(e.target.value as RecurrenceType)}
-                  className="w-full px-3 py-2 text-xs bg-white border border-indigo-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-600 font-medium"
-                >
-                  <option value="weekly">Semanal (mesmo dia da semana)</option>
-                  <option value="biweekly">Quinzenal (a cada 2 semanas)</option>
-                  <option value="daily">Diária (dias úteis seg-sex)</option>
-                </select>
+            <div className="pt-3 border-t border-indigo-200/60 space-y-3 animate-fade-in">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* 1. Data Inicial */}
+                <div>
+                  <label htmlFor="recurrence-start-date-input" className="block text-xs font-semibold text-indigo-950 mb-1 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Data Inicial da Recorrência: *</span>
+                  </label>
+                  <input
+                    id="recurrence-start-date-input"
+                    type="date"
+                    required
+                    min={new Date().toISOString().split('T')[0]}
+                    value={date}
+                    onChange={(e) => {
+                      const newStart = e.target.value;
+                      setDate(newStart);
+                      if (!recurrenceEndDate || recurrenceEndDate <= newStart) {
+                        setRecurrenceEndDate(calculateEndDateFromCount(newStart, recurrenceFrequency, recurrenceCount, skipWeekends));
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs bg-white border border-indigo-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-600 font-medium"
+                  />
+                </div>
+
+                {/* 2. Data Final da Recorrência */}
+                <div>
+                  <label htmlFor="recurrence-end-date-input" className="block text-xs font-semibold text-indigo-950 mb-1 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Data Final da Recorrência: *</span>
+                  </label>
+                  <input
+                    id="recurrence-end-date-input"
+                    type="date"
+                    required
+                    min={date || new Date().toISOString().split('T')[0]}
+                    value={recurrenceEndDate}
+                    onChange={(e) => {
+                      const newEnd = e.target.value;
+                      setRecurrenceEndDate(newEnd);
+                      if (newEnd && date && newEnd >= date) {
+                        const calculated = generateRecurrenceDatesUntilEndDate(date, newEnd, recurrenceFrequency, skipWeekends);
+                        setRecurrenceCount(calculated.length);
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs bg-white border border-indigo-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-600 font-medium"
+                  />
+                </div>
+
+                {/* 3. Frequência */}
+                <div>
+                  <label htmlFor="recurrence-frequency-select" className="block text-xs font-semibold text-indigo-950 mb-1">
+                    Frequência da Repetição:
+                  </label>
+                  <select
+                    id="recurrence-frequency-select"
+                    value={recurrenceFrequency}
+                    onChange={(e) => {
+                      const newFreq = e.target.value as RecurrenceType;
+                      setRecurrenceFrequency(newFreq);
+                      setRecurrenceEndDate(calculateEndDateFromCount(date, newFreq, recurrenceCount, skipWeekends));
+                    }}
+                    className="w-full px-3 py-2 text-xs bg-white border border-indigo-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-600 font-medium"
+                  >
+                    <option value="weekly">Semanal (mesmo dia da semana)</option>
+                    <option value="biweekly">Quinzenal (a cada 2 semanas)</option>
+                    <option value="daily">Diária (dias úteis seg-sex)</option>
+                  </select>
+                </div>
+
+                {/* 4. Quantidade de Aulas / Ocorrências */}
+                <div>
+                  <label htmlFor="recurrence-count-select" className="block text-xs font-semibold text-indigo-950 mb-1">
+                    Quantidade de Aulas / Ocorrências:
+                  </label>
+                  <select
+                    id="recurrence-count-select"
+                    value={recurrenceCount}
+                    onChange={(e) => {
+                      const newCount = Number(e.target.value);
+                      setRecurrenceCount(newCount);
+                      setRecurrenceEndDate(calculateEndDateFromCount(date, recurrenceFrequency, newCount, skipWeekends));
+                    }}
+                    className="w-full px-3 py-2 text-xs bg-white border border-indigo-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-600 font-medium"
+                  >
+                    <option value={2}>2 aulas</option>
+                    <option value={3}>3 aulas</option>
+                    <option value={4}>4 aulas (aprox. 1 mês)</option>
+                    <option value={6}>6 aulas</option>
+                    <option value={8}>8 aulas (aprox. 2 meses)</option>
+                    <option value={12}>12 aulas (1 trimestre)</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-indigo-950 mb-1">
-                  Quantidade de Aulas / Ocorrências:
-                </label>
-                <select
-                  value={recurrenceCount}
-                  onChange={(e) => setRecurrenceCount(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs bg-white border border-indigo-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-600 font-medium"
-                >
-                  <option value={2}>2 aulas</option>
-                  <option value={3}>3 aulas</option>
-                  <option value={4}>4 aulas (1 mês aprox.)</option>
-                  <option value={6}>6 aulas</option>
-                  <option value={8}>8 aulas (2 meses aprox.)</option>
-                  <option value={12}>12 aulas (1 trimestre)</option>
-                </select>
-              </div>
+              {/* Barra de resumo e botão de conferência */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-indigo-100/80">
+                <div className="flex items-center gap-2 text-xs text-indigo-900">
+                  <Repeat className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span className="text-[11px] text-slate-600">
+                    {recurrenceEndDate && date ? (
+                      <>
+                        Período: <strong>{formatDateBR(date)}</strong> até <strong>{formatDateBR(recurrenceEndDate)}</strong>
+                      </>
+                    ) : (
+                      'Informe a data inicial e final da recorrência'
+                    )}
+                  </span>
+                </div>
 
-              <div className="flex flex-col justify-end">
                 <button
                   type="button"
                   onClick={handleOpenRecurrenceConfirmation}
-                  className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                  className="py-2 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer shrink-0"
                 >
                   <CalendarDays className="w-3.5 h-3.5" />
                   <span>Verificar & Confirmar Datas</span>
@@ -1121,7 +1106,52 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             </div>
 
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5">
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pb-2.5 border-b border-slate-200">
+                  <div>
+                    <label htmlFor="modal-recurrence-start-date" className="font-bold text-slate-900 flex items-center gap-1.5 mb-1">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Data Inicial:</span>
+                    </label>
+                    <input
+                      id="modal-recurrence-start-date"
+                      type="date"
+                      min={new Date().toISOString().split('T')[0]}
+                      value={date}
+                      onChange={(e) => {
+                        const newStart = e.target.value;
+                        setDate(newStart);
+                        let newEnd = recurrenceEndDate;
+                        if (!newEnd || newEnd < newStart) {
+                          newEnd = calculateEndDateFromCount(newStart, recurrenceFrequency, recurrenceCount, skipWeekends);
+                          setRecurrenceEndDate(newEnd);
+                        }
+                        prepareRecurrenceDates(newStart, newEnd, recurrenceFrequency);
+                      }}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-indigo-300 rounded-lg font-bold text-indigo-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="modal-recurrence-end-date" className="font-bold text-slate-900 flex items-center gap-1.5 mb-1">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Data Final (Repetir até):</span>
+                    </label>
+                    <input
+                      id="modal-recurrence-end-date"
+                      type="date"
+                      min={date || new Date().toISOString().split('T')[0]}
+                      value={recurrenceEndDate}
+                      onChange={(e) => {
+                        const newEnd = e.target.value;
+                        setRecurrenceEndDate(newEnd);
+                        prepareRecurrenceDates(date, newEnd, recurrenceFrequency);
+                      }}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-indigo-300 rounded-lg font-bold text-indigo-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
                 <div className="flex justify-between">
                   <span className="text-slate-500">Laboratório:</span>
                   <span className="font-bold text-slate-900">{selectedLab.name}</span>
@@ -1140,15 +1170,21 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     {startTime} às {endTime}
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex items-center justify-between pt-1">
                   <span className="text-slate-500">Frequência:</span>
-                  <span className="font-bold text-indigo-700">
-                    {recurrenceFrequency === 'weekly'
-                      ? 'Semanal'
-                      : recurrenceFrequency === 'biweekly'
-                        ? 'Quinzenal'
-                        : 'Diária'} ({calculatedDates.length} ocorrências)
-                  </span>
+                  <select
+                    value={recurrenceFrequency}
+                    onChange={(e) => {
+                      const newFreq = e.target.value as RecurrenceType;
+                      setRecurrenceFrequency(newFreq);
+                      prepareRecurrenceDates(date, recurrenceEndDate, newFreq);
+                    }}
+                    className="px-2 py-1 text-xs bg-white border border-indigo-200 rounded-lg font-bold text-indigo-700 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                  >
+                    <option value="weekly">Semanal ({calculatedDates.length} aulas)</option>
+                    <option value="biweekly">Quinzenal ({calculatedDates.length} aulas)</option>
+                    <option value="daily">Diária ({calculatedDates.length} aulas)</option>
+                  </select>
                 </div>
               </div>
 

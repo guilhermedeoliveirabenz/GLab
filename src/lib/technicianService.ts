@@ -34,11 +34,25 @@ export function sanitizeTechnician(tech: Technician): Technician {
   return sanitized;
 }
 
+// Helper para desduplicar técnicos por id
+export function deduplicateTechnicians(list: Technician[]): Technician[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const result: Technician[] = [];
+  for (const item of list) {
+    if (item && item.id && !seen.has(item.id)) {
+      seen.add(item.id);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
 // Helper de cache local
 export function getLocalTechnicians(): Technician[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return deduplicateTechnicians(JSON.parse(raw));
   } catch (e) {
     console.warn('Erro ao ler cache de técnicos:', e);
   }
@@ -47,7 +61,7 @@ export function getLocalTechnicians(): Technician[] {
 
 function setLocalTechnicians(techs: Technician[]) {
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(techs));
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(deduplicateTechnicians(techs)));
   } catch (e) {
     console.warn('Erro ao salvar cache de técnicos:', e);
   }
@@ -58,7 +72,7 @@ function setLocalTechnicians(techs: Technician[]) {
  */
 export function subscribeToTechnicians(callback: (technicians: Technician[]) => void): () => void {
   // Envia cache local imediatamente (sem senhas)
-  const localData = getLocalTechnicians().map(sanitizeTechnician);
+  const localData = deduplicateTechnicians(getLocalTechnicians()).map(sanitizeTechnician);
   callback(localData);
 
   if (!db) {
@@ -74,8 +88,9 @@ export function subscribeToTechnicians(callback: (technicians: Technician[]) => 
         snapshot.forEach((d) => {
           list.push({ ...d.data(), id: d.id } as Technician);
         });
-        setLocalTechnicians(list);
-        callback(list.map(sanitizeTechnician));
+        const deduplicated = deduplicateTechnicians(list);
+        setLocalTechnicians(deduplicated);
+        callback(deduplicated.map(sanitizeTechnician));
       },
       (error) => {
         console.warn('Erro no listener de técnicos Firestore:', error);

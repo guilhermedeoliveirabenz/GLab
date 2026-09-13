@@ -18,14 +18,28 @@ const LOCAL_STORAGE_KEY = 'school_lab_bookings_cache';
 // Base de agendamentos inicial vazia (sem dados fictícios)
 const INITIAL_DEMO_BOOKINGS: Booking[] = [];
 
+// Helper para desduplicar agendamentos por id
+export function deduplicateBookings(list: Booking[]): Booking[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const result: Booking[] = [];
+  for (const item of list) {
+    if (item && item.id && !seen.has(item.id)) {
+      seen.add(item.id);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
 // Helper para ler do cache local
 function getLocalCache(): Booking[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (raw) {
       const parsed: Booking[] = JSON.parse(raw);
-      // Remove qualquer dado de demonstração remanescente
-      const cleaned = parsed.filter((b) => !b.id.startsWith('demo-booking-'));
+      // Remove qualquer dado de demonstração remanescente e elimina duplicatas de id
+      const cleaned = deduplicateBookings(parsed.filter((b) => !b.id.startsWith('demo-booking-')));
       if (cleaned.length !== parsed.length) {
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
       }
@@ -40,7 +54,7 @@ function getLocalCache(): Booking[] {
 // Helper para salvar no cache local
 function setLocalCache(bookings: Booking[]) {
   try {
-    const cleaned = bookings.filter((b) => !b.id.startsWith('demo-booking-'));
+    const cleaned = deduplicateBookings(bookings.filter((b) => !b.id.startsWith('demo-booking-')));
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
   } catch (e) {
     console.warn('Erro ao salvar cache local:', e);
@@ -91,11 +105,12 @@ export function subscribeToBookings(callback: (bookings: Booking[]) => void): ()
           }
         });
 
-        // Ordena por data e horário
-        list.sort((a, b) => b.createdAt - a.createdAt);
+        // Ordena por data e horário e elimina quaisquer duplicatas de id
+        const deduplicated = deduplicateBookings(list);
+        deduplicated.sort((a, b) => b.createdAt - a.createdAt);
 
-        setLocalCache(list);
-        callback(list);
+        setLocalCache(deduplicated);
+        callback(deduplicated);
       },
       (error) => {
         console.warn('Firestore onSnapshot listener error, relying on local storage fallback:', error);
@@ -131,7 +146,7 @@ export async function clearAllBookings(): Promise<void> {
  * Cria um novo agendamento
  */
 export async function createBooking(newBooking: Omit<Booking, 'id' | 'createdAt' | 'status' | 'whatsappSent'>): Promise<Booking> {
-  const id = `res-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+  const id = `res-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
   const booking: Booking = {
     ...newBooking,
     id,
@@ -151,9 +166,9 @@ export async function createBooking(newBooking: Omit<Booking, 'id' | 'createdAt'
     }
   }
 
-  // Atualiza cache local
-  const current = getLocalCache();
-  const updated = [booking, ...current];
+  // Atualiza cache local garantindo ausência de duplicatas
+  const current = getLocalCache().filter((b) => b.id !== id);
+  const updated = deduplicateBookings([booking, ...current]);
   setLocalCache(updated);
 
   return booking;
@@ -173,7 +188,7 @@ export async function createRecurringBookings(
 
   for (let i = 0; i < dates.length; i++) {
     const targetDate = dates[i];
-    const id = `res-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`;
+    const id = `res-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 8)}`;
     const b: Booking = {
       ...baseBooking,
       id,
@@ -199,8 +214,9 @@ export async function createRecurringBookings(
     createdList.push(b);
   }
 
-  const current = getLocalCache();
-  const updated = [...createdList, ...current];
+  const newIds = new Set(createdList.map((b) => b.id));
+  const current = getLocalCache().filter((b) => !newIds.has(b.id));
+  const updated = deduplicateBookings([...createdList, ...current]);
   setLocalCache(updated);
 
   return createdList;

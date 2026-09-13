@@ -64,3 +64,62 @@ export function generateRecurrenceDates(
 
   return dates;
 }
+
+/**
+ * Gera lista de datas futuras baseado no tipo de recorrência e uma Data Final específica (inclusive)
+ */
+export function generateRecurrenceDatesUntilEndDate(
+  startDateStr: string,
+  endDateStr: string,
+  frequency: RecurrenceType,
+  skipWeekends = true,
+  maxOccurrences = 52,
+): string[] {
+  if (frequency === 'none' || !startDateStr) {
+    return startDateStr ? [startDateStr] : [];
+  }
+
+  if (!endDateStr || endDateStr <= startDateStr) {
+    return [startDateStr];
+  }
+
+  const dates: string[] = [startDateStr];
+  let currentDate = startDateStr;
+
+  while (dates.length < maxOccurrences) {
+    let nextDate: string;
+    if (frequency === 'daily') {
+      nextDate = skipWeekends
+        ? addWorkingDays(currentDate, 1)
+        : addDaysToDate(currentDate, 1);
+    } else if (frequency === 'weekly') {
+      nextDate = addDaysToDate(currentDate, 7);
+    } else if (frequency === 'biweekly') {
+      nextDate = addDaysToDate(currentDate, 14);
+    } else {
+      break;
+    }
+
+    if (nextDate > endDateStr) {
+      break;
+    }
+
+    dates.push(nextDate);
+    currentDate = nextDate;
+  }
+
+  return dates;
+}
+
+/**
+ * Calcula a data final esperada para uma quantidade específica de ocorrências
+ */
+export function calculateEndDateFromCount(
+  startDateStr: string,
+  frequency: RecurrenceType,
+  count: number,
+  skipWeekends = true,
+): string {
+  const dates = generateRecurrenceDates(startDateStr, frequency, count, skipWeekends);
+  return dates[dates.length - 1] || startDateStr;
+}

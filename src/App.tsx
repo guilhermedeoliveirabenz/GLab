@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { Booking, Lab, LAB_LIST } from './types';
-import { subscribeToBookings } from './lib/bookingService';
+import { subscribeToBookings, deduplicateBookings } from './lib/bookingService';
 import { subscribeToLabs } from './lib/labService';
 import { Navbar, ActiveTab } from './components/Navbar';
 import { LabGrid } from './components/LabGrid';
@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 
 function AppContent() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [labs, setLabs] = useState<Lab[]>(LAB_LIST);
   const [activeTab, setActiveTab] = useState<ActiveTab>('calendar');
@@ -41,7 +41,8 @@ function AppContent() {
 
   // Inscrição em tempo real no Firestore para agendamentos e laboratórios
   useEffect(() => {
-    const unsubBookings = subscribeToBookings((data) => {
+    const unsubBookings = subscribeToBookings((rawData) => {
+      const data = deduplicateBookings(rawData);
       // Se não for a carga inicial e houver novos agendamentos criados, dispara alerta
       if (!isInitialLoadRef.current) {
         const prevIds = new Set(prevBookingsRef.current.map((b) => b.id));
@@ -78,6 +79,13 @@ function AppContent() {
       unsubLabs();
     };
   }, []);
+
+  // O painel de admin só deve aparecer para usuário admin ou técnico logado
+  useEffect(() => {
+    if (activeTab === 'admin' && !isAdmin) {
+      setActiveTab('calendar');
+    }
+  }, [activeTab, isAdmin]);
 
   const pendingCount = bookings.filter((b) => b.status === 'pending').length;
 
@@ -151,14 +159,14 @@ function AppContent() {
               </button>
             )}
 
-            {!isAdmin && (
+            {isAdmin && (
               <button
-                id="hero-admin-access-btn"
-                onClick={() => setIsLoginModalOpen(true)}
+                id="hero-admin-panel-btn"
+                onClick={() => setActiveTab('admin')}
                 className="w-full sm:w-auto px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
-                <Lock className="w-3.5 h-3.5 text-amber-400" />
-                <span>Área do Administrador</span>
+                <Shield className="w-3.5 h-3.5 text-amber-400" />
+                <span>{user?.role === 'technician' ? 'Painel do Técnico' : 'Painel Administrativo'}</span>
               </button>
             )}
           </div>
@@ -211,6 +219,7 @@ function AppContent() {
 
             <BookingCalendar
               bookings={bookings}
+              labs={labs}
               onRequestNewBooking={(date) => {
                 setPreselectedDate(date);
                 setActiveTab('booking');
@@ -229,27 +238,8 @@ function AppContent() {
           />
         )}
 
-        {activeTab === 'admin' && (
-          isAdmin ? (
-            <AdminPanel bookings={bookings} labs={labs} />
-          ) : (
-            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center max-w-md mx-auto shadow-xs">
-              <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-200">
-                <Lock className="w-7 h-7" />
-              </div>
-              <h2 className="text-xl font-bold text-slate-900 mb-2">Acesso Restrito ao Administrador</h2>
-              <p className="text-xs text-slate-600 mb-6">
-                Faça login para gerenciar o histórico de agendamentos, aprovar solicitações e encaminhar a confirmação por WhatsApp.
-              </p>
-              <button
-                id="prompt-login-admin-btn"
-                onClick={() => setIsLoginModalOpen(true)}
-                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-xs"
-              >
-                Fazer Login como Administrador
-              </button>
-            </div>
-          )
+        {activeTab === 'admin' && isAdmin && (
+          <AdminPanel bookings={bookings} labs={labs} />
         )}
       </main>
 
@@ -296,21 +286,11 @@ function AppContent() {
             <p className="text-[11px] text-slate-400 mt-0.5">
               📅 {latestNewBookingAlert.date} • ⏰ {latestNewBookingAlert.timeSlot} (Turma: {latestNewBookingAlert.classGroup})
             </p>
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab('admin');
-                  setLatestNewBookingAlert(null);
-                }}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shadow-xs"
-              >
-                Ver no Painel
-              </button>
+            <div className="mt-2.5 flex items-center justify-end">
               <button
                 type="button"
                 onClick={() => setLatestNewBookingAlert(null)}
-                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg transition-colors cursor-pointer"
               >
                 Fechar
               </button>

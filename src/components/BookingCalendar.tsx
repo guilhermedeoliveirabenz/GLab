@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Booking, LAB_LIST } from '../types';
+import { Booking, LAB_LIST, Lab } from '../types';
 import { formatDateBR } from '../lib/whatsapp';
 import {
   Calendar as CalendarIcon,
@@ -15,10 +15,14 @@ import {
   Filter,
   Plus,
   Repeat,
+  Wrench,
+  AlertTriangle,
+  Info,
 } from 'lucide-react';
 
 interface BookingCalendarProps {
   bookings: Booking[];
+  labs?: Lab[];
   onSelectBooking?: (booking: Booking) => void;
   onRequestNewBooking?: (date: string) => void;
 }
@@ -27,6 +31,7 @@ type CalendarViewMode = 'day' | 'week' | 'month';
 
 export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   bookings,
+  labs = LAB_LIST,
   onSelectBooking,
   onRequestNewBooking,
 }) => {
@@ -35,6 +40,13 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [selectedShift, setSelectedShift] = useState<string>('all');
   const [activeBookingModal, setActiveBookingModal] = useState<Booking | null>(null);
+  const [selectedMaintenanceLabModal, setSelectedMaintenanceLabModal] = useState<Lab | null>(null);
+
+  // Laboratórios em manutenção
+  const maintenanceLabs = labs.filter((l) => l.isUnderMaintenance);
+  const activeMaintenanceLabs = maintenanceLabs.filter(
+    (l) => selectedLabId === 'all' || l.id === selectedLabId,
+  );
 
   // Filtragem dos agendamentos
   const filteredBookings = bookings.filter((b) => {
@@ -294,6 +306,38 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
         </div>
       </div>
 
+      {/* Banner de Laboratórios em Manutenção */}
+      {maintenanceLabs.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-950 shadow-2xs">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-800 shrink-0 mt-0.5 sm:mt-0">
+              <Wrench className="w-4 h-4 animate-pulse" />
+            </div>
+            <div>
+              <span className="font-bold block sm:inline text-amber-900">
+                Atenção: {maintenanceLabs.length} {maintenanceLabs.length === 1 ? 'Laboratório em Manutenção' : 'Laboratórios em Manutenção'}
+              </span>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                {maintenanceLabs.map((l) => `${l.name}${l.maintenanceReason ? ` (${l.maintenanceReason})` : ''}`).join(' • ')}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <span className="text-[11px] bg-amber-200/80 text-amber-900 px-2.5 py-1 rounded-lg font-bold">
+              Bloqueado para novas reservas
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Dica amigável de clique para agendar */}
+      <div className="flex items-center justify-between text-xs text-slate-500 px-1">
+        <span className="flex items-center gap-1.5 text-blue-700 font-medium">
+          <CalendarIcon className="w-3.5 h-3.5 text-blue-600" />
+          Dica: clique diretamente em qualquer dia do calendário para iniciar um novo agendamento naquela data.
+        </span>
+      </div>
+
       {/* ========================================================= */}
       {/* 1. MODO MÊS (MONTH VIEW)                                 */}
       {/* ========================================================= */}
@@ -319,8 +363,16 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
               return (
                 <div
                   key={index}
-                  className={`min-h-[105px] sm:min-h-[125px] p-1.5 sm:p-2 transition-colors flex flex-col justify-between ${
-                    dayObj.isCurrentMonth ? 'bg-white' : 'bg-slate-50/50 text-slate-400'
+                  onClick={() => {
+                    if (dayObj.isCurrentMonth && onRequestNewBooking) {
+                      onRequestNewBooking(dayObj.dateStr);
+                    }
+                  }}
+                  title={dayObj.isCurrentMonth ? `Clique para agendar aula no dia ${formatDateBR(dayObj.dateStr)}` : undefined}
+                  className={`min-h-[110px] sm:min-h-[130px] p-1.5 sm:p-2 transition-all flex flex-col justify-between group ${
+                    dayObj.isCurrentMonth
+                      ? 'bg-white hover:bg-blue-50/40 hover:border-blue-300 cursor-pointer'
+                      : 'bg-slate-50/50 text-slate-400'
                   } ${isToday ? 'ring-2 ring-blue-500 ring-inset bg-blue-50/20' : ''}`}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -339,22 +391,45 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                     {onRequestNewBooking && dayObj.isCurrentMonth && (
                       <button
                         type="button"
-                        onClick={() => onRequestNewBooking(dayObj.dateStr)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRequestNewBooking(dayObj.dateStr);
+                        }}
                         title="Agendar neste dia"
-                        className="opacity-0 group-hover:opacity-100 hover:opacity-100 text-slate-400 hover:text-blue-600 p-0.5 rounded transition-opacity cursor-pointer"
+                        className="opacity-0 group-hover:opacity-100 hover:opacity-100 flex items-center gap-1 bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded transition-all cursor-pointer shadow-2xs"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Plus className="w-3 h-3" />
+                        <span className="hidden sm:inline">Agendar</span>
                       </button>
                     )}
                   </div>
 
-                  {/* Agendamentos do dia */}
-                  <div className="flex-1 space-y-1 overflow-y-auto max-h-[75px] sm:max-h-[95px] pr-0.5">
-                    {dayBookings.slice(0, 3).map((b) => (
+                  {/* Eventos e Manutenções do dia */}
+                  <div className="flex-1 space-y-1 overflow-y-auto max-h-[85px] sm:max-h-[105px] pr-0.5">
+                    {/* Laboratórios em manutenção fixos */}
+                    {dayObj.isCurrentMonth &&
+                      activeMaintenanceLabs.map((mLab) => (
+                        <div
+                          key={`maint-${mLab.id}-${dayObj.dateStr}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedMaintenanceLabModal(mLab);
+                          }}
+                          className="w-full text-left px-1.5 py-0.5 text-[10px] sm:text-[11px] rounded font-bold border truncate flex items-center gap-1 bg-amber-100 text-amber-950 border-amber-300 shadow-2xs hover:bg-amber-200 transition-all cursor-pointer"
+                          title={`🛠️ ${mLab.name} - Em Manutenção: ${mLab.maintenanceReason || 'Reparos técnicos'}`}
+                        >
+                          <Wrench className="w-2.5 h-2.5 text-amber-700 shrink-0 animate-pulse" />
+                          <span className="truncate">{mLab.name} (Manut.)</span>
+                        </div>
+                      ))}
+
+                    {/* Agendamentos do dia */}
+                    {dayBookings.slice(0, 3).map((b, bIdx) => (
                       <button
-                        key={b.id}
+                        key={`${b.id}-${bIdx}`}
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setActiveBookingModal(b);
                           onSelectBooking?.(b);
                         }}
@@ -382,7 +457,8 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                     {dayBookings.length > 3 && (
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setCurrentDate(dayObj.date);
                           setViewMode('day');
                         }}
@@ -390,6 +466,14 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                       >
                         +{dayBookings.length - 3} mais...
                       </button>
+                    )}
+
+                    {dayBookings.length === 0 && activeMaintenanceLabs.length === 0 && dayObj.isCurrentMonth && (
+                      <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity py-2">
+                        <span className="text-[10px] text-blue-600 font-medium flex items-center gap-1">
+                          <Plus className="w-3 h-3" /> Clique p/ Agendar
+                        </span>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -412,7 +496,9 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                 return (
                   <div
                     key={dayObj.dateStr}
-                    className={`py-3 px-2 ${isToday ? 'bg-blue-50/60' : ''}`}
+                    onClick={() => onRequestNewBooking?.(dayObj.dateStr)}
+                    className={`py-3 px-2 transition-colors cursor-pointer hover:bg-blue-50/70 group ${isToday ? 'bg-blue-50/60' : ''}`}
+                    title="Clique para agendar aula nesta data"
                   >
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">
                       {dayObj.dayName}
@@ -423,6 +509,9 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                       }`}
                     >
                       {dayObj.date.getDate()}
+                    </span>
+                    <span className="text-[10px] text-blue-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity block mt-0.5">
+                      + Agendar
                     </span>
                   </div>
                 );
@@ -435,16 +524,51 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                 const dayBookings = filteredBookings.filter((b) => b.date === dayObj.dateStr);
 
                 return (
-                  <div key={dayObj.dateStr} className="p-2 space-y-2 bg-slate-50/20">
-                    {dayBookings.length === 0 ? (
-                      <div className="h-full flex items-center justify-center text-center p-3">
-                        <span className="text-[11px] text-slate-400">Livre</span>
+                  <div
+                    key={dayObj.dateStr}
+                    onClick={() => onRequestNewBooking?.(dayObj.dateStr)}
+                    className="p-2 space-y-2 bg-slate-50/20 hover:bg-blue-50/20 transition-colors cursor-pointer flex flex-col justify-start"
+                    title={`Clique para agendar aula em ${formatDateBR(dayObj.dateStr)}`}
+                  >
+                    {/* Laboratórios em manutenção nesta coluna */}
+                    {activeMaintenanceLabs.map((mLab) => (
+                      <div
+                        key={`week-maint-${mLab.id}-${dayObj.dateStr}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedMaintenanceLabModal(mLab);
+                        }}
+                        className="p-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 text-xs space-y-1 shadow-2xs hover:bg-amber-100 transition-colors cursor-pointer"
+                        title={`Clique para ver detalhes da manutenção`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-bold truncate text-[11px] flex items-center gap-1 text-amber-900">
+                            <Wrench className="w-3 h-3 text-amber-600 shrink-0" />
+                            {mLab.name}
+                          </span>
+                          <span className="text-[9px] bg-amber-200 text-amber-900 font-bold px-1.5 py-0.5 rounded-full">
+                            Manutenção
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-amber-800 line-clamp-2">
+                          {mLab.maintenanceReason || 'Em reparos técnicos'}
+                        </p>
+                      </div>
+                    ))}
+
+                    {dayBookings.length === 0 && activeMaintenanceLabs.length === 0 ? (
+                      <div className="h-full min-h-[140px] flex flex-col items-center justify-center text-center p-3 rounded-xl border border-dashed border-slate-200 hover:border-blue-400 hover:bg-blue-50/40 transition-colors">
+                        <Plus className="w-4 h-4 text-slate-300 group-hover:text-blue-600 mb-1" />
+                        <span className="text-[11px] text-slate-400 group-hover:text-blue-700 font-medium">
+                          Livre • Clique p/ Agendar
+                        </span>
                       </div>
                     ) : (
-                      dayBookings.map((b) => (
+                      dayBookings.map((b, bIdx) => (
                         <div
-                          key={b.id}
-                          onClick={() => {
+                          key={`${b.id}-${bIdx}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setActiveBookingModal(b);
                             onSelectBooking?.(b);
                           }}
@@ -496,19 +620,68 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
       {/* ========================================================= */}
       {viewMode === 'day' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+          <div className="p-4 border-b border-slate-100 bg-slate-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <CalendarIcon className="w-4 h-4 text-blue-600" />
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
                 Agendamentos em {formatDateBR(currentDateStr)}
               </span>
             </div>
-            <span className="text-xs font-medium text-slate-500">
-              {filteredBookings.filter((b) => b.date === currentDateStr).length} agendamento(s)
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-slate-500">
+                {filteredBookings.filter((b) => b.date === currentDateStr).length} agendamento(s)
+              </span>
+              {onRequestNewBooking && (
+                <button
+                  type="button"
+                  onClick={() => onRequestNewBooking(currentDateStr)}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Agendar neste dia</span>
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="p-4 sm:p-5">
+          <div className="p-4 sm:p-5 space-y-5">
+            {/* Laboratórios em manutenção no dia selecionado */}
+            {activeMaintenanceLabs.length > 0 && (
+              <div className="space-y-2.5">
+                <h4 className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                  <Wrench className="w-4 h-4 text-amber-600" />
+                  <span>Laboratório(s) em Manutenção neste Dia ({activeMaintenanceLabs.length}):</span>
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {activeMaintenanceLabs.map((mLab) => (
+                    <div
+                      key={`day-maint-${mLab.id}`}
+                      onClick={() => setSelectedMaintenanceLabModal(mLab)}
+                      className="p-3.5 rounded-xl border border-amber-300 bg-amber-50/90 hover:bg-amber-100 transition-colors cursor-pointer flex items-start gap-3"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center shrink-0">
+                        <Wrench className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0 text-xs">
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <strong className="text-slate-900 text-sm">{mLab.name}</strong>
+                          <span className="text-[10px] bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded-full">
+                            Interditado
+                          </span>
+                        </div>
+                        <p className="text-amber-900 text-[11px]">
+                          <strong>Motivo:</strong> {mLab.maintenanceReason || 'Em reparos técnicos pela equipe de suporte'}
+                        </p>
+                        <p className="text-slate-500 text-[10px] mt-1">
+                          Indisponível para novos agendamentos até a conclusão dos serviços técnicos.
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {filteredBookings.filter((b) => b.date === currentDateStr).length === 0 ? (
               <div className="text-center py-12">
                 <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
@@ -518,7 +691,9 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                   Nenhum agendamento neste dia
                 </h3>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-                  Todos os laboratórios estão disponíveis para uso nesta data.
+                  {activeMaintenanceLabs.length > 0
+                    ? 'Os demais laboratórios estão disponíveis para uso nesta data.'
+                    : 'Todos os laboratórios estão disponíveis para uso nesta data.'}
                 </p>
                 {onRequestNewBooking && (
                   <button
@@ -536,9 +711,9 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                 {filteredBookings
                   .filter((b) => b.date === currentDateStr)
                   .sort((a, b) => (a.startTime || a.timeSlot).localeCompare(b.startTime || b.timeSlot))
-                  .map((booking) => (
+                  .map((booking, bIdx) => (
                     <div
-                      key={booking.id}
+                      key={`${booking.id}-${bIdx}`}
                       onClick={() => {
                         setActiveBookingModal(booking);
                         onSelectBooking?.(booking);
@@ -697,6 +872,91 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                   type="button"
                   onClick={() => setActiveBookingModal(null)}
                   className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Detalhes de Laboratório em Manutenção */}
+      {selectedMaintenanceLabModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-amber-200 overflow-hidden animate-fade-in">
+            <div className="p-4 bg-amber-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wrench className="w-5 h-5" />
+                <h3 className="text-sm font-bold">Laboratório em Manutenção</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedMaintenanceLabModal(null)}
+                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3.5 text-xs">
+              <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-100">
+                <div>
+                  <h4 className="font-bold text-base text-slate-900">
+                    {selectedMaintenanceLabModal.name}
+                  </h4>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    {selectedMaintenanceLabModal.description}
+                  </p>
+                </div>
+                <span className="text-xs bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2.5 py-1 rounded-full flex items-center gap-1 shrink-0">
+                  <Wrench className="w-3 h-3 text-amber-700" />
+                  Interditado
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-slate-700">
+                <div className="p-2.5 bg-slate-50 rounded-xl">
+                  <span className="text-[11px] text-slate-400 block font-medium">Capacidade</span>
+                  <span className="font-bold text-slate-800">{selectedMaintenanceLabModal.capacity} alunos</span>
+                </div>
+                <div className="p-2.5 bg-slate-50 rounded-xl">
+                  <span className="text-[11px] text-slate-400 block font-medium">Tipo</span>
+                  <span className="font-bold text-slate-800 capitalize">
+                    {selectedMaintenanceLabModal.type === 'mobile' ? 'Carrinho Móvel' : 'Laboratório Fixo'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1 text-amber-950">
+                <span className="font-bold block text-xs flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                  Motivo da Manutenção (Equipe Técnica):
+                </span>
+                <p className="text-xs text-amber-900 font-medium leading-relaxed">
+                  {selectedMaintenanceLabModal.maintenanceReason || 'Em reparos técnicos e preventivos pela equipe de TI'}
+                </p>
+              </div>
+
+              {selectedMaintenanceLabModal.broadcastMessage && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 text-blue-950">
+                  <span className="font-bold block text-xs flex items-center gap-1">
+                    <Info className="w-3.5 h-3.5 text-blue-600" />
+                    Comunicado da TI:
+                  </span>
+                  <p className="text-xs text-blue-900">{selectedMaintenanceLabModal.broadcastMessage}</p>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-500 italic bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                ℹ️ Novas reservas para este laboratório estão temporariamente bloqueadas no sistema até que o técnico finalize a manutenção e libere o espaço.
+              </p>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedMaintenanceLabModal(null)}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-colors cursor-pointer text-xs"
                 >
                   Fechar
                 </button>

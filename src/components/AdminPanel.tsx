@@ -386,7 +386,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
           }`}
         >
           <Shield className="w-4 h-4 text-emerald-600" />
-          <span>Segurança & Senha</span>
+          <span>Segurança & Instituição</span>
         </button>
       </div>
 
@@ -646,13 +646,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredBookings.map((b) => {
+                    {filteredBookings.map((b, idx) => {
                       const isPending = b.status === 'pending';
                       const isConfirmed = b.status === 'confirmed';
 
                       return (
                         <tr
-                          key={b.id}
+                          key={`${b.id}-${idx}`}
                           id={`admin-row-${b.id}`}
                           className={`hover:bg-slate-50/80 transition-colors ${
                             isPending ? 'bg-amber-50/20' : ''

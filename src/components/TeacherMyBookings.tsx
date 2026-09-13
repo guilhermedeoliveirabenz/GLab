@@ -6,22 +6,30 @@ import {
   Search,
   Calendar,
   Phone,
-  CheckCircle,
   Clock,
-  XCircle,
   Truck,
-  Monitor,
-  FileText,
   UserCheck,
   LogOut,
   Laptop,
-  Sparkles,
   Repeat,
+  ArrowRight,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface TeacherMyBookingsProps {
   bookings: Booking[];
   onNewBookingClick: () => void;
+}
+
+function formatDisplayPhone(val: string): string {
+  const digits = val.replace(/\D/g, '');
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return val;
 }
 
 export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
@@ -34,7 +42,7 @@ export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
   const [query, setQuery] = useState('');
   const [phoneError, setPhoneError] = useState<string | null>(null);
 
-  // Formatação de telefone
+  // Formatação de telefone em tempo de digitação
   const handlePhoneInputChange = (val: string) => {
     const raw = val.replace(/\D/g, '');
     let formatted = raw;
@@ -55,220 +63,240 @@ export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
     setPhoneError(null);
     const raw = phoneInput.replace(/\D/g, '');
     if (raw.length < 10) {
-      setPhoneError('Por favor digite um número de WhatsApp/celular válido (com DDD, mínimo 10 dígitos).');
+      setPhoneError('Por favor digite um número de WhatsApp válido (com DDD, mínimo 10 dígitos).');
       return;
     }
     loginTeacher(raw, nameInput.trim() || undefined);
   };
 
-  // Se professor está logado por telefone, filtra estritamente por suas reservas ou complementa com busca
-  const loggedPhone = teacherSession ? teacherSession.phone : null;
-  const cleanSearch = query.replace(/\D/g, '');
-
-  const matchingBookings = bookings.filter((b) => {
-    const rawBookingPhone = b.whatsapp.replace(/\D/g, '');
-
-    // Se o professor estiver autenticado pelo celular
-    if (loggedPhone) {
-      const matchPhone = rawBookingPhone.includes(loggedPhone) || loggedPhone.includes(rawBookingPhone);
-      if (!matchPhone) return false;
-      if (!query.trim()) return true;
-      const matchLab = b.labName.toLowerCase().includes(query.toLowerCase());
-      const matchClass = b.classGroup.toLowerCase().includes(query.toLowerCase());
-      const matchDate = b.date.includes(query);
-      return matchLab || matchClass || matchDate;
-    }
-
-    // Se não estiver logado, busca aberta geral
-    if (!query.trim()) return true;
-    const matchName = b.teacherName.toLowerCase().includes(query.toLowerCase());
-    const matchClass = b.classGroup.toLowerCase().includes(query.toLowerCase());
-    const matchPhone = cleanSearch ? rawBookingPhone.includes(cleanSearch) : false;
-    return matchName || matchClass || matchPhone;
-  });
-
-  return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      {/* Teacher Phone Identification Banner */}
-      {!teacherSession ? (
+  // CASO 1: SE A PESSOA AINDA NÃO COLOCOU O NÚMERO DO WHATSAPP, NÃO MOSTRA NENHUM AGENDAMENTO
+  if (!teacherSession) {
+    return (
+      <div className="max-w-xl mx-auto py-4">
         <div
-          id="teacher-phone-login-card"
-          className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6 shadow-xs"
+          id="teacher-phone-required-card"
+          className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xs text-center"
         >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                <Phone className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  Acesse com seu WhatsApp / Celular
-                </h2>
-                <p className="text-xs text-slate-600">
-                  Informe seu número para carregar automaticamente o histórico completo de todas as suas solicitações.
-                </p>
-              </div>
-            </div>
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 border border-emerald-100 shadow-2xs">
+            <Phone className="w-8 h-8" />
           </div>
 
+          <h2 className="text-xl font-bold text-slate-900 mb-2">
+            Meus Agendamentos
+          </h2>
+          <p className="text-sm text-slate-600 max-w-md mx-auto mb-6">
+            Para consultar e acompanhar o status das suas reservas, digite o número do WhatsApp informado no agendamento.
+          </p>
+
           {phoneError && (
-            <div className="mb-3 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl font-medium text-left">
               {phoneError}
             </div>
           )}
 
-          <form onSubmit={handleTeacherLoginSubmit} className="flex flex-col sm:flex-row gap-2.5">
-            <div className="flex-1">
+          <form onSubmit={handleTeacherLoginSubmit} className="space-y-3.5 text-left">
+            <div>
+              <label htmlFor="teacher-phone-input" className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Número do seu WhatsApp: *</span>
+              </label>
               <input
                 id="teacher-phone-input"
                 type="tel"
                 required
-                placeholder="Seu WhatsApp: (XX) XXXXX-XXXX"
+                autoFocus
+                placeholder="(XX) XXXXX-XXXX"
                 value={phoneInput}
                 onChange={(e) => handlePhoneInputChange(e.target.value)}
-                className="w-full px-4 py-2.5 text-sm bg-white border border-blue-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 font-mono text-slate-900 placeholder:text-slate-400"
+                className="w-full px-4 py-3 text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 font-mono text-slate-900 placeholder:text-slate-400"
               />
             </div>
-            <div className="sm:w-48">
+
+            <div>
+              <label htmlFor="teacher-name-optional-input" className="block text-xs font-medium text-slate-600 mb-1.5">
+                Seu Nome (Opcional):
+              </label>
               <input
                 id="teacher-name-optional-input"
                 type="text"
-                placeholder="Seu Nome (Opcional)"
+                placeholder="Ex: Prof. João Silva"
                 value={nameInput}
                 onChange={(e) => setNameInput(e.target.value)}
-                className="w-full px-4 py-2.5 text-sm bg-white border border-blue-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 text-slate-900 placeholder:text-slate-400"
+                className="w-full px-4 py-2.5 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 placeholder:text-slate-400"
               />
             </div>
+
             <button
               id="submit-teacher-phone-btn"
               type="submit"
-              className="px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shrink-0 shadow-xs cursor-pointer"
+              className="w-full py-3 px-5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-2 mt-2"
             >
-              Consultar Histórico
+              <span>Ver Meus Agendamentos</span>
+              <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-        </div>
-      ) : (
-        <div
-          id="teacher-authenticated-banner"
-          className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-              <UserCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-900 text-sm">
-                  {teacherSession.name || 'Professor(a) Conectado(a)'}
-                </span>
-                <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-full">
-                  Filtro Ativo
-                </span>
-              </div>
-              <p className="text-xs text-emerald-800 font-mono mt-0.5">
-                WhatsApp: {teacherSession.phone} • Visualizando apenas seus agendamentos ({matchingBookings.length} encontrados)
-              </p>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="mt-6 pt-5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+            <span className="flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
+              Acesso seguro às suas solicitações
+            </span>
             <button
-              id="teacher-new-booking-btn"
+              type="button"
               onClick={onNewBookingClick}
-              className="px-3.5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-xs"
+              className="text-blue-600 hover:text-blue-700 font-semibold cursor-pointer"
             >
-              + Nova Reserva
+              + Fazer Novo Agendamento
             </button>
-            <button
-              id="teacher-logout-btn"
-              onClick={logoutTeacher}
-              title="Trocar de número ou sair"
-              className="px-3 py-2 text-xs font-medium text-slate-700 hover:text-slate-900 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Trocar Celular</span>
-            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // CASO 2: O PROFESSOR INFORMOU O WHATSAPP - MOSTRA APENAS OS AGENDAMENTOS DELE
+  const loggedPhoneDigits = teacherSession.phone.replace(/\D/g, '');
+
+  const userBookings = bookings.filter((b) => {
+    const bookingDigits = b.whatsapp.replace(/\D/g, '');
+    if (!bookingDigits || !loggedPhoneDigits) return false;
+
+    // Comparação exata ou tolerante com código de país
+    return (
+      bookingDigits === loggedPhoneDigits ||
+      (bookingDigits.endsWith(loggedPhoneDigits) && loggedPhoneDigits.length >= 8) ||
+      (loggedPhoneDigits.endsWith(bookingDigits) && bookingDigits.length >= 8)
+    );
+  });
+
+  const matchingBookings = userBookings.filter((b) => {
+    if (!query.trim()) return true;
+    const q = query.toLowerCase().trim();
+    return (
+      b.labName.toLowerCase().includes(q) ||
+      b.classGroup.toLowerCase().includes(q) ||
+      (b.subject && b.subject.toLowerCase().includes(q)) ||
+      b.date.includes(q)
+    );
+  });
+
+  return (
+    <div className="space-y-6 max-w-4xl mx-auto">
+      {/* Banner de Identificação Ativa */}
+      <div
+        id="teacher-authenticated-banner"
+        className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+            <UserCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-900 text-sm">
+                {teacherSession.name ? `Prof. ${teacherSession.name}` : 'Meus Agendamentos'}
+              </span>
+              <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-full">
+                WhatsApp Identificado
+              </span>
+            </div>
+            <p className="text-xs text-emerald-800 font-mono mt-0.5">
+              WhatsApp: <strong>{formatDisplayPhone(teacherSession.phone)}</strong> • {userBookings.length} agendamento(s) registrado(s)
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            id="teacher-new-booking-btn"
+            onClick={onNewBookingClick}
+            className="px-3.5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl transition-colors shadow-xs cursor-pointer"
+          >
+            + Nova Reserva
+          </button>
+          <button
+            id="teacher-logout-btn"
+            onClick={logoutTeacher}
+            title="Trocar de número de WhatsApp ou sair"
+            className="px-3 py-2 text-xs font-medium text-slate-700 hover:text-slate-900 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Trocar WhatsApp</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Busca rápida entre os próprios agendamentos */}
+      {userBookings.length > 0 && (
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+            <input
+              id="search-teacher-bookings-input"
+              type="text"
+              placeholder="Filtrar por turma, laboratório, data ou matéria..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600"
+            />
           </div>
         </div>
       )}
 
-      {/* Search Header */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">
-              {teacherSession ? 'Filtrar em Minhas Reservas' : 'Consultar Agendamentos Escolares'}
-            </h2>
-            <p className="text-xs text-slate-500">
-              {teacherSession
-                ? 'Pesquise por data, turma ou laboratório entre seus agendamentos.'
-                : 'Você também pode pesquisar digitando qualquer nome de professor ou número de WhatsApp abaixo.'}
-            </p>
-          </div>
-          {!teacherSession && (
-            <button
-              id="teacher-new-booking-btn-secondary"
-              onClick={onNewBookingClick}
-              className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shrink-0 shadow-xs"
-            >
-              + Nova Reserva
-            </button>
-          )}
-        </div>
-
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-          <input
-            id="search-teacher-bookings-input"
-            type="text"
-            placeholder={
-              teacherSession
-                ? 'Filtrar por turma, laboratório ou data...'
-                : 'Buscar por nome do professor, telefone WhatsApp ou turma...'
-            }
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
-          />
-        </div>
-      </div>
-
-      {/* Bookings List */}
+      {/* Lista de Agendamentos */}
       <div className="space-y-3">
-        {matchingBookings.length === 0 ? (
-          <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500">
+        {userBookings.length === 0 ? (
+          <div className="bg-white p-10 sm:p-12 rounded-3xl border border-slate-200 text-center text-slate-500">
             <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="font-semibold text-slate-700 text-sm">Nenhum agendamento encontrado</p>
-            <p className="text-xs text-slate-600 mt-1">
-              {teacherSession
-                ? 'Você ainda não possui agendamentos cadastrados com este número de celular.'
-                : 'Verifique o número informado ou realize um novo agendamento.'}
+            <p className="font-bold text-slate-800 text-base">Nenhum agendamento encontrado</p>
+            <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto">
+              Não encontramos nenhuma solicitação registrada para o número de WhatsApp{' '}
+              <strong className="font-mono text-slate-800">{formatDisplayPhone(teacherSession.phone)}</strong>.
             </p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={logoutTeacher}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                Informar Outro Número
+              </button>
+              <button
+                type="button"
+                onClick={onNewBookingClick}
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                + Fazer Nova Reserva
+              </button>
+            </div>
+          </div>
+        ) : matchingBookings.length === 0 ? (
+          <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-500">
+            <p className="font-semibold text-slate-700 text-sm">Nenhum agendamento corresponde à sua pesquisa "{query}"</p>
             <button
-              onClick={onNewBookingClick}
-              className="mt-4 px-4 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors inline-flex items-center gap-1.5"
+              type="button"
+              onClick={() => setQuery('')}
+              className="mt-3 px-3 py-1.5 text-xs text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 font-medium cursor-pointer"
             >
-              Solicitar Reserva de Laboratório Agora
+              Limpar Filtro
             </button>
           </div>
         ) : (
-          matchingBookings.map((b) => {
+          matchingBookings.map((b, index) => {
             const isConfirmed = b.status === 'confirmed';
             const isPending = b.status === 'pending';
-            const isRejected = b.status === 'rejected' || b.status === 'cancelled';
 
             return (
               <div
-                key={b.id}
+                key={`${b.id}-${index}`}
                 id={`teacher-booking-${b.id}`}
-                className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs hover:border-slate-300 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs hover:border-slate-300 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
               >
                 <div className="space-y-1.5 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-slate-900 text-base">{b.labName}</span>
                     <span
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                      className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
                         isConfirmed
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                           : isPending
@@ -282,11 +310,6 @@ export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
                           ? '⏳ Aguardando Aprovação'
                           : '❌ Recusado/Cancelado'}
                     </span>
-                    {b.whatsappSent && (
-                      <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                        WhatsApp Enviado
-                      </span>
-                    )}
                     {b.recurrenceGroupId && (
                       <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                         <Repeat className="w-2.5 h-2.5" />
@@ -314,7 +337,7 @@ export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
                     </span>
                     <span className="flex items-center gap-1 font-mono text-emerald-700">
                       <Phone className="w-3.5 h-3.5" />
-                      {b.whatsapp}
+                      {formatDisplayPhone(b.whatsapp)}
                     </span>
                     {b.requestedMachines && (
                       <span className="flex items-center gap-1 font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
@@ -344,7 +367,7 @@ export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
                 </div>
 
                 <div className="text-right sm:border-l sm:border-slate-100 sm:pl-4 self-stretch sm:self-center flex flex-col justify-center">
-                  <span className="text-[11px] text-slate-600 block">Solicitado em:</span>
+                  <span className="text-[11px] text-slate-400 block">Solicitado em:</span>
                   <span className="text-xs font-mono text-slate-600">
                     {new Date(b.createdAt).toLocaleDateString('pt-BR')}
                   </span>
@@ -357,4 +380,3 @@ export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
     </div>
   );
 };
-

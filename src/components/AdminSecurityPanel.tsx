@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../lib/authContext';
 import {
   ShieldCheck,
@@ -11,7 +11,16 @@ import {
   UserCheck,
   ShieldAlert,
   Fingerprint,
+  Building2,
+  RotateCcw,
+  Check,
+  Monitor,
 } from 'lucide-react';
+import {
+  subscribeToInstitutionSubtitle,
+  updateInstitutionSubtitle,
+  DEFAULT_INSTITUTION_SUBTITLE,
+} from '../lib/settingsService';
 
 export const AdminSecurityPanel: React.FC = () => {
   const { user, isSuperAdmin, updateAdminPassword, lockoutStatus, logout } = useAuth();
@@ -25,6 +34,51 @@ export const AdminSecurityPanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Subtítulo da Instituição (padrão CTI/UNASP-HT)
+  const [subtitle, setSubtitle] = useState(DEFAULT_INSTITUTION_SUBTITLE);
+  const [subtitleInput, setSubtitleInput] = useState(DEFAULT_INSTITUTION_SUBTITLE);
+  const [savingSubtitle, setSavingSubtitle] = useState(false);
+  const [subtitleSuccess, setSubtitleSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = subscribeToInstitutionSubtitle((val) => {
+      setSubtitle(val);
+      setSubtitleInput(val);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSaveSubtitle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSubtitle(true);
+    setSubtitleSuccess(null);
+    try {
+      const res = await updateInstitutionSubtitle(subtitleInput);
+      if (res.success) {
+        setSubtitleSuccess('Informação da instituição atualizada com sucesso no cabeçalho do GestLab!');
+      }
+      setTimeout(() => setSubtitleSuccess(null), 3500);
+    } catch (e) {
+      console.error('Erro ao atualizar subtítulo:', e);
+    } finally {
+      setSavingSubtitle(false);
+    }
+  };
+
+  const handleRestoreDefault = async () => {
+    setSubtitleInput(DEFAULT_INSTITUTION_SUBTITLE);
+    setSavingSubtitle(true);
+    try {
+      await updateInstitutionSubtitle(DEFAULT_INSTITUTION_SUBTITLE);
+      setSubtitleSuccess('Padrão CTI/UNASP-HT restaurado com sucesso!');
+      setTimeout(() => setSubtitleSuccess(null), 3500);
+    } catch (e) {
+      console.error('Erro ao restaurar padrão:', e);
+    } finally {
+      setSavingSubtitle(false);
+    }
+  };
 
   const calculateStrength = (pass: string) => {
     if (!pass) return 0;
@@ -309,6 +363,102 @@ export const AdminSecurityPanel: React.FC = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Card 3: Identidade da Instituição & Subtítulo do GestLab */}
+      <div id="admin-institution-identity-card" className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold shadow-xs">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                Identidade da Instituição (Texto Abaixo de GestLab)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Altere a sigla ou nome da instituição exibido no cabeçalho do sistema. Valor padrão: <strong>CTI/UNASP-HT</strong>
+              </p>
+            </div>
+          </div>
+
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 self-start sm:self-auto">
+            <Monitor className="w-3.5 h-3.5" />
+            Cabeçalho Global
+          </span>
+        </div>
+
+        {subtitleSuccess && (
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2 animate-fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{subtitleSuccess}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveSubtitle} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Nome/Sigla da Instituição *
+              </label>
+              <input
+                id="admin-institution-subtitle-input"
+                type="text"
+                required
+                placeholder="Ex: CTI/UNASP-HT"
+                value={subtitleInput}
+                onChange={(e) => setSubtitleInput(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-800 border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600"
+              />
+              <p className="text-[11px] text-slate-500 mt-1.5">
+                Esta informação fica visível para todos os professores, técnicos e visitantes no topo da aplicação.
+              </p>
+            </div>
+
+            {/* Prévia do Cabeçalho */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                Visualização no Topo do GestLab:
+              </span>
+              <div className="flex items-center gap-2.5 p-2 bg-white rounded-lg border border-slate-200">
+                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-xs">
+                  <Monitor className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-extrabold text-slate-900 text-sm tracking-tight block leading-none">
+                    GestLab
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-600 block leading-tight mt-0.5">
+                    {subtitleInput.trim() || DEFAULT_INSTITUTION_SUBTITLE}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+            <button
+              id="admin-restore-default-subtitle-btn"
+              type="button"
+              onClick={handleRestoreDefault}
+              disabled={savingSubtitle}
+              className="px-3.5 py-2 text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer font-medium disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Restaurar Padrão (CTI/UNASP-HT)</span>
+            </button>
+
+            <button
+              id="admin-save-institution-subtitle-btn"
+              type="submit"
+              disabled={savingSubtitle}
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>{savingSubtitle ? 'Salvando Alteração...' : 'Salvar Informação da Instituição'}</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
