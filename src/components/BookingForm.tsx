@@ -10,6 +10,12 @@ import { formatDateBR } from '../lib/whatsapp';
 import { getLabMaintenanceStatus } from '../lib/maintenanceUtils';
 import { useAuth } from '../lib/authContext';
 import {
+  getBookingDateLimits,
+  validateBookingLeadTime,
+  MIN_BOOKING_ADVANCE_WORKING_DAYS,
+  MAX_BOOKING_ADVANCE_WORKING_DAYS,
+} from '../lib/bookingRuleUtils';
+import {
   Calendar,
   Clock,
   User,
@@ -29,6 +35,8 @@ import {
   Repeat,
   Info,
   CalendarDays,
+  CalendarClock,
+  Shield,
   Check,
   X,
 } from 'lucide-react';
@@ -49,10 +57,15 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   preselectedDate,
   onBookingCreated,
 }) => {
-  const { teacherSession, loginTeacher } = useAuth();
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const defaultDate = preselectedDate || tomorrow.toISOString().split('T')[0];
+  const { teacherSession, loginTeacher, isAdmin } = useAuth();
+  const [allowUrgentBypass, setAllowUrgentBypass] = useState(false);
+
+  // Regras de Agendamento: Mínimo 3 dias úteis e Máximo 20 dias úteis
+  const dateLimits = getBookingDateLimits();
+  const { minDate, maxDate, minDateFormatted, maxDateFormatted, minDateFull, maxDateFull } = dateLimits;
+
+  // Se houver data pré-selecionada, utilize-a; caso contrário, use minDate (1ª data permitida)
+  const defaultDate = preselectedDate || minDate;
 
   const [teacherName, setTeacherName] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
@@ -84,6 +97,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [successBooking, setSuccessBooking] = useState<Booking | null>(null);
   const [recurringSuccessCount, setRecurringSuccessCount] = useState<number | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
+
+  // Validação em tempo real da regra de antecedência de 3 a 20 dias úteis
+  const dateValidation = validateBookingLeadTime(date);
 
   // Sync session if teacher is logged in
   useEffect(() => {
@@ -155,6 +171,33 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
     const conflictsFound: { date: string; conflict: Booking }[] = [];
     dates.forEach((d) => {
+      // Verifica regras de antecedência de 3 a 20 dias úteis
+      if (!(isAdmin && allowUrgentBypass)) {
+        const leadTimeCheck = validateBookingLeadTime(d);
+        if (!leadTimeCheck.isValid) {
+          conflictsFound.push({
+            date: d,
+            conflict: {
+              id: `rule-${d}`,
+              labId,
+              labName: selectedLab?.name || 'Laboratório',
+              isMobileLab: Boolean(selectedLab?.isMobile),
+              shift: 'manha',
+              whatsappSent: false,
+              date: d,
+              timeSlot: formattedTimeSlot,
+              teacherName: 'REGRA DE AGENDAMENTO (BLOQUEIO)',
+              whatsapp: '',
+              classGroup: 'Fora do Prazo Permitido',
+              subject: leadTimeCheck.errorReason || 'Fora do intervalo de 3 a 20 dias úteis',
+              status: 'cancelled',
+              createdAt: Date.now(),
+            },
+          });
+          return;
+        }
+      }
+
       const conf = checkBookingConflict(existingBookings, labId, d, formattedTimeSlot, startTime, endTime);
       if (conf) {
         conflictsFound.push({ date: d, conflict: conf });
@@ -223,6 +266,21 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       return;
     }
 
+    // Regra de antecedência e limite máximo
+    if (!(isAdmin && allowUrgentBypass)) {
+      const startCheck = validateBookingLeadTime(date);
+      if (!startCheck.isValid) {
+        setConflictError(`Data Inicial inválida: ${startCheck.errorReason}`);
+        return;
+      }
+      if (recurrenceEndDate && recurrenceEndDate > maxDate) {
+        setConflictError(
+          `A Data Final (${formatDateBR(recurrenceEndDate)}) ultrapassa o limite de ${MAX_BOOKING_ADVANCE_WORKING_DAYS} dias úteis permitidos (limite: ${maxDateFormatted}). Ajuste a data final ou a quantidade de repetições.`,
+        );
+        return;
+      }
+    }
+
     setConflictError(null);
     prepareRecurrenceDates();
     setShowRecurrenceModal(true);
@@ -286,6 +344,15 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setConflictError(null);
+
+    // Validação da regra de antecedência (mínimo 3 dias úteis) e prazo limite (máximo 20 dias úteis)
+    if (!(isAdmin && allowUrgentBypass)) {
+      const leadTimeCheck = validateBookingLeadTime(date);
+      if (!leadTimeCheck.isValid) {
+        setConflictError(leadTimeCheck.errorReason);
+        return;
+      }
+    }
 
     // Validação de bloqueio por manutenção
     if (isLabUnderMaintenance) {
@@ -409,6 +476,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     setRoomNumber('');
     setNotes('');
     setIsRecurring(false);
+    setDate(minDate);
+    setRecurrenceEndDate(calculateEndDateFromCount(minDate, recurrenceFrequency, recurrenceCount, skipWeekends));
   };
 
   if (successBooking) {
@@ -514,6 +583,66 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6">
+        {/* AVISO IMPORTANTE: REGRAS E PRAZOS DE ANTECEDÊNCIA */}
+        <div
+          id="booking-rule-notice-banner"
+          className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-50/95 via-indigo-50/80 to-blue-50/95 border border-blue-200/90 shadow-2xs"
+        >
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 rounded-xl bg-blue-600 text-white shrink-0 mt-0.5 shadow-xs">
+              <CalendarClock className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2">
+                <h3 className="font-bold text-sm text-blue-950 flex items-center gap-2">
+                  <span>Aviso Importante: Regras de Antecedência e Prazos</span>
+                </h3>
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-800 bg-white/90 px-2.5 py-0.5 rounded-full border border-blue-200 shrink-0 self-start sm:self-auto shadow-2xs">
+                  Janela Permitida Hoje
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs text-slate-700">
+                <div className="flex items-start gap-2.5 bg-white/85 p-3 rounded-xl border border-blue-100 shadow-2xs">
+                  <div className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+                  <div>
+                    <strong className="text-slate-900 font-semibold block mb-0.5">Antecedência Mínima:</strong>
+                    <span className="text-slate-600 leading-relaxed">
+                      O agendamento deve ser realizado com pelo menos <strong>{MIN_BOOKING_ADVANCE_WORKING_DAYS} dias úteis de antecedência</strong>.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 bg-white/85 p-3 rounded-xl border border-blue-100 shadow-2xs">
+                  <div className="w-2 h-2 rounded-full bg-blue-600 mt-1.5 shrink-0" />
+                  <div>
+                    <strong className="text-slate-900 font-semibold block mb-0.5">Prazo Máximo:</strong>
+                    <span className="text-slate-600 leading-relaxed">
+                      Permitido no máximo até <strong>{MAX_BOOKING_ADVANCE_WORKING_DAYS} dias úteis para frente</strong>.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 pt-2.5 border-t border-blue-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-slate-600 font-medium text-[11px]">Datas liberadas para reserva hoje:</span>
+                  <span className="font-bold text-blue-900 bg-white px-2.5 py-1 rounded-lg border border-blue-300 shadow-2xs text-[11px]">
+                    {minDateFormatted} até {maxDateFormatted}
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    ({minDateFull.split(',')[0]} até {maxDateFull.split(',')[0]})
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span>Sábados e domingos não contam como dias úteis.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {conflictError && (
           <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm flex items-start gap-3 animate-fade-in">
             <AlertTriangle className="w-5 h-5 shrink-0 text-red-600 mt-0.5" />
@@ -529,7 +658,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           <label className="block text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
             <Monitor className="w-4 h-4 text-blue-600" />
             <span>Selecione o Laboratório</span>
-            <span className="text-xs font-normal text-slate-600">(12 opções disponíveis)</span>
+            <span className="text-xs font-normal text-slate-600">({labs.length} opções disponíveis)</span>
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
             {labs.map((lab) => {
@@ -866,23 +995,56 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Data Inicial */}
-            <div>
-              <label
-                htmlFor="booking-date-input"
-                className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5"
-              >
-                <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                <span>{isRecurring ? 'Data da 1ª Aula *' : 'Data da Reserva *'}</span>
-              </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="booking-date-input"
+                  className="block text-xs font-semibold text-slate-700 flex items-center gap-1.5"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  <span>{isRecurring ? 'Data da 1ª Aula *' : 'Data da Reserva *'}</span>
+                </label>
+                <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-sm border border-blue-100">
+                  3 a 20 dias úteis
+                </span>
+              </div>
               <input
                 id="booking-date-input"
                 type="date"
                 required
-                min={new Date().toISOString().split('T')[0]}
+                min={isAdmin && allowUrgentBypass ? undefined : minDate}
+                max={isAdmin && allowUrgentBypass ? undefined : maxDate}
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:border-blue-600 font-medium"
+                className={`w-full px-3.5 py-2.5 text-sm bg-white border rounded-xl focus:outline-hidden focus:ring-2 font-medium transition-colors ${
+                  !dateValidation.isValid && !(isAdmin && allowUrgentBypass)
+                    ? 'border-red-400 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                    : 'border-slate-300 focus:ring-blue-600 focus:border-blue-600'
+                }`}
               />
+
+              {/* Feedback e validação em tempo real */}
+              <div>
+                {dateValidation.isValid ? (
+                  <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>{dateValidation.warningMessage}</span>
+                  </div>
+                ) : isAdmin && allowUrgentBypass ? (
+                  <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                    <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                    <span>Bypass ativo (Administrador/Emergência)</span>
+                  </div>
+                ) : (
+                  <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold">Aviso de Regra: </span>
+                      <span>{dateValidation.errorReason}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Horário de Início */}
@@ -923,6 +1085,27 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               />
             </div>
           </div>
+
+          {/* Opção de Bypass para Administrador */}
+          {isAdmin && (
+            <div className="p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-amber-900">
+                <Shield className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  <strong>Acesso Técnico / Admin:</strong> Permitir agendamento excepcional fora do prazo de 3 a 20 dias úteis?
+                </span>
+              </div>
+              <label className="inline-flex items-center gap-1.5 font-bold text-amber-900 cursor-pointer self-end sm:self-auto">
+                <input
+                  type="checkbox"
+                  checked={allowUrgentBypass}
+                  onChange={(e) => setAllowUrgentBypass(e.target.checked)}
+                  className="rounded-sm border-amber-300 text-amber-600 focus:ring-amber-500"
+                />
+                <span>Liberar Bypass</span>
+              </label>
+            </div>
+          )}
 
           {/* Rótulo / Turno */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -997,7 +1180,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     id="recurrence-start-date-input"
                     type="date"
                     required
-                    min={new Date().toISOString().split('T')[0]}
+                    min={isAdmin && allowUrgentBypass ? undefined : minDate}
+                    max={isAdmin && allowUrgentBypass ? undefined : maxDate}
                     value={date}
                     onChange={(e) => {
                       const newStart = e.target.value;
@@ -1020,7 +1204,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     id="recurrence-end-date-input"
                     type="date"
                     required
-                    min={date || new Date().toISOString().split('T')[0]}
+                    min={date || minDate}
+                    max={isAdmin && allowUrgentBypass ? undefined : maxDate}
                     value={recurrenceEndDate}
                     onChange={(e) => {
                       const newEnd = e.target.value;
@@ -1151,7 +1336,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             </span>
           </button>
           <p className="text-center text-[11px] text-slate-600 mt-2">
-            Os dados serão salvos no banco de dados Firebase. O administrador revisará e enviará a confirmação por WhatsApp.
+            Sua solicitação de agendamento será enviada para análise e confirmação da coordenação via WhatsApp.
           </p>
         </div>
       </form>
@@ -1190,7 +1375,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     <input
                       id="modal-recurrence-start-date"
                       type="date"
-                      min={new Date().toISOString().split('T')[0]}
+                      min={isAdmin && allowUrgentBypass ? undefined : minDate}
+                      max={isAdmin && allowUrgentBypass ? undefined : maxDate}
                       value={date}
                       onChange={(e) => {
                         const newStart = e.target.value;
@@ -1214,7 +1400,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     <input
                       id="modal-recurrence-end-date"
                       type="date"
-                      min={date || new Date().toISOString().split('T')[0]}
+                      min={date || minDate}
+                      max={isAdmin && allowUrgentBypass ? undefined : maxDate}
                       value={recurrenceEndDate}
                       onChange={(e) => {
                         const newEnd = e.target.value;

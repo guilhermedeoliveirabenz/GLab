@@ -371,10 +371,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                     {activeTab === 'pending' && 'Aguardando Aprovação'}
                     {activeTab === 'all' && 'Todos os Agendamentos'}
                     {activeTab === 'calendar' && 'Calendário (Dia / Semana / Mês)'}
-                    {activeTab === 'schedule' && 'Grade Diária (12 Labs)'}
+                    {activeTab === 'schedule' && `Grade Diária (${labs.length} Labs)`}
                     {activeTab === 'mobile_route' && 'Roteiro de Carrinhos Móveis'}
                     {activeTab === 'technicians' && 'Equipe de Técnicos'}
-                    {activeTab === 'softwares' && 'Labs: Manutenção & Softwares'}
+                    {activeTab === 'softwares' && 'Gestão de Labs (Incluir/Editar/Obs)'}
                     {activeTab === 'security' && 'Segurança & Instituição'}
                   </h3>
                 </div>
@@ -634,7 +634,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                       <Calendar className="w-4 h-4" />
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-slate-900 block">Grade Diária (12 Labs)</span>
+                      <span className="text-xs font-bold text-slate-900 block">Grade Diária ({labs.length} Labs)</span>
                       <p className="text-[11px] text-slate-500 line-clamp-1">
                         Matriz de ocupação e horários simultâneos
                       </p>
@@ -802,7 +802,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
           onSelectBooking={(b) => handleOpenWhatsAppModal(b)}
         />
       ) : activeTab === 'schedule' ? (
-        <ScheduleMatrixView bookings={bookings} onOpenWhatsApp={handleOpenWhatsAppModal} />
+        <ScheduleMatrixView
+          bookings={bookings}
+          labs={labs}
+          onOpenWhatsApp={handleOpenWhatsAppModal}
+        />
       ) : (
         <div className="space-y-4">
           {/* Barra de Foco do Técnico: Opção de qual laboratório visualizar */}
@@ -823,7 +827,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                     <p className="text-xs text-slate-600 mt-0.5">
                       {userAssignedLabs
                         ? `Você está designado para ${userAssignedLabs.length} laboratório(s). Escolha qual deseja visualizar:`
-                        : 'Você possui permissão para visualizar todos os 12 laboratórios da escola:'}
+                        : `Você possui permissão para visualizar todos os ${labs.length} laboratórios da escola:`}
                     </p>
                   </div>
                 </div>
@@ -841,7 +845,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                     <option value="all">
                       {userAssignedLabs
                         ? `★ Todos os Meus Labs Vinculados (${userAssignedLabs.length})`
-                        : '★ Todos os Laboratórios (12)'}
+                        : `★ Todos os Laboratórios (${labs.length})`}
                     </option>
                     {(userAssignedLabs
                       ? labs.filter((l) => userAssignedLabs.includes(l.id))
@@ -867,7 +871,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                       : 'bg-white text-slate-700 border border-blue-200 hover:bg-blue-100'
                   }`}
                 >
-                  {userAssignedLabs ? `Meus Labs (${userAssignedLabs.length})` : 'Todos (12)'}
+                  {userAssignedLabs ? `Meus Labs (${userAssignedLabs.length})` : `Todos (${labs.length})`}
                 </button>
                 {(userAssignedLabs
                   ? labs.filter((l) => userAssignedLabs.includes(l.id))
@@ -920,7 +924,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                 className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
               >
                 <option value="all">
-                  {userAssignedLabs ? `Meus Labs Atribuídos (${userAssignedLabs.length})` : 'Todos os Labs (12)'}
+                  {userAssignedLabs ? `Meus Labs Atribuídos (${userAssignedLabs.length})` : `Todos os Labs (${labs.length})`}
                 </option>
                 <optgroup label="Laboratórios Fixos">
                   {(userAssignedLabs
@@ -1223,12 +1227,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
 };
 
 /**
- * Grade visual de horários de todos os 12 laboratórios por dia
+ * Grade visual de horários de todos os laboratórios por dia
  */
 const ScheduleMatrixView: React.FC<{
   bookings: Booking[];
+  labs?: Lab[];
   onOpenWhatsApp: (b: Booking) => void;
-}> = ({ bookings, onOpenWhatsApp }) => {
+}> = ({ bookings, labs = LAB_LIST, onOpenWhatsApp }) => {
   const [matrixDate, setMatrixDate] = useState(new Date().toISOString().split('T')[0]);
 
   const activeDayBookings = bookings.filter(
@@ -1240,7 +1245,7 @@ const ScheduleMatrixView: React.FC<{
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
         <div>
           <h3 className="font-bold text-slate-900 text-base">
-            Ocupação Geral dos 12 Laboratórios
+            Ocupação Geral dos {labs.length} Laboratórios
           </h3>
           <p className="text-xs text-slate-500">
             Visão consolidada por aula/horário para a data selecionada.
@@ -1275,7 +1280,7 @@ const ScheduleMatrixView: React.FC<{
             </tr>
           </thead>
           <tbody>
-            {LAB_LIST.map((lab) => {
+            {labs.map((lab) => {
               return (
                 <tr key={lab.id} className="hover:bg-slate-50/50">
                   <td className="p-3 border border-slate-200 sticky left-0 bg-white z-10 font-medium">

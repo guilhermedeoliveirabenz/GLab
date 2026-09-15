@@ -174,6 +174,7 @@ function AppContent() {
           <LabGrid
             bookings={bookings}
             labs={labs}
+            isAdmin={isAdmin}
             onSelectLabToBook={handleSelectLabToBook}
           />
         )}
@@ -197,7 +198,7 @@ function AppContent() {
                   <span>Calendário Geral de Agendamentos dos Laboratórios</span>
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Consulte a disponibilidade de todos os 12 laboratórios e carrinhos por dia, semana ou mês
+                  Consulte a disponibilidade de todos os {labs.length} laboratórios e carrinhos por dia, semana ou mês
                 </p>
               </div>
               <button

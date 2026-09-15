@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { Booking, LAB_LIST, Lab } from '../types';
 import { formatDateBR } from '../lib/whatsapp';
 import {
+  getBookingDateLimits,
+  MIN_BOOKING_ADVANCE_WORKING_DAYS,
+  MAX_BOOKING_ADVANCE_WORKING_DAYS,
+} from '../lib/bookingRuleUtils';
+import {
   getLabMaintenanceStatus,
   formatMaintenancePeriod,
   doTimesOverlap,
@@ -9,6 +14,7 @@ import {
 } from '../lib/maintenanceUtils';
 import {
   Calendar as CalendarIcon,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -215,8 +221,34 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
     }
   };
 
+  const { minDateFormatted, maxDateFormatted } = getBookingDateLimits();
+
   return (
     <div className="space-y-4">
+      {/* Barra Informativa de Regras de Agendamento */}
+      <div
+        id="calendar-booking-rules-info"
+        className="bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-blue-50/90 border border-blue-200/80 rounded-2xl p-3 sm:px-4 sm:py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs text-slate-800 shadow-2xs"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+            <CalendarClock className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="font-bold text-slate-900">Regras Oficiais de Agendamento:</span>{' '}
+            <span className="text-slate-600">
+              Antecedência mínima de <strong>{MIN_BOOKING_ADVANCE_WORKING_DAYS} dias úteis</strong> e no máximo <strong>{MAX_BOOKING_ADVANCE_WORKING_DAYS} dias úteis</strong> para frente.
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 self-end sm:self-center">
+          <span className="text-[11px] text-slate-500 font-medium">Janela liberada hoje:</span>
+          <span className="font-bold text-blue-900 bg-white px-2 py-0.5 rounded-md border border-blue-200 text-[11px] shadow-2xs">
+            {minDateFormatted} a {maxDateFormatted}
+          </span>
+        </div>
+      </div>
+
       {/* Calendar Top Controls */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
         {/* Navigation buttons and Title */}
