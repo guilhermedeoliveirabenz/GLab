@@ -66,6 +66,16 @@ export function generateWhatsAppMessage(booking: Booking, customAdminNote?: stri
     `📅 *Data:* ${formattedDate}`,
     `⏰ *Horário/Aula:* ${booking.timeSlot}`,
     `👥 *Turma:* ${booking.classGroup}`,
+    ...(booking.educationLevel
+      ? [
+          `🎓 *Segmento:* ${{
+            basico: 'Ensino Básico',
+            superior: 'Ensino Superior',
+            ead: 'EAD',
+            outros: 'Outros',
+          }[booking.educationLevel] || booking.educationLevel}`,
+        ]
+      : []),
   ];
 
   if (booking.subject) {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Booking, LAB_LIST, Lab, RecurrenceType } from '../types';
+import { Booking, LAB_LIST, Lab, RecurrenceType, EducationLevel } from '../types';
+import { EducationBadge, EducationLevelSelector } from './EducationBadge';
 import { checkBookingConflict, createBooking, createRecurringBookings } from '../lib/bookingService';
 import {
   generateRecurrenceDates,
@@ -69,6 +70,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
   const [teacherName, setTeacherName] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
+  const [educationLevel, setEducationLevel] = useState<EducationLevel>('basico');
   const [classGroup, setClassGroup] = useState('');
   const [subject, setSubject] = useState('');
   const [labId, setLabId] = useState(preselectedLabId || labs[0]?.id || 'lab-1');
@@ -309,6 +311,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           whatsapp: whatsapp.trim(),
           classGroup: classGroup.trim(),
           subject: subject.trim() || undefined,
+          educationLevel,
           labId,
           labName: selectedLab.name,
           isMobileLab,
@@ -440,6 +443,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         whatsapp: whatsapp.trim(),
         classGroup: classGroup.trim(),
         subject: subject.trim() || undefined,
+        educationLevel,
         labId,
         labName: selectedLab.name,
         isMobileLab,
@@ -524,6 +528,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             <span className="text-slate-500">Turma:</span>
             <span className="font-semibold text-slate-800">{successBooking.classGroup}</span>
           </div>
+          {successBooking.educationLevel && (
+            <div className="flex justify-between border-b border-slate-200 pb-2 items-center">
+              <span className="text-slate-500">Nível / Segmento:</span>
+              <EducationBadge level={successBooking.educationLevel} size="sm" />
+            </div>
+          )}
           <div className="flex justify-between border-b border-slate-200 pb-2">
             <span className="text-slate-500">
               {recurringSuccessCount ? 'Primeira Data e Horário:' : 'Data e Horário:'}
@@ -939,7 +949,16 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           </div>
         </div>
 
-        {/* 3. Turma e Assunto */}
+        {/* 3. Nível de Ensino / Segmento */}
+        <div className="bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
+          <EducationLevelSelector
+            value={educationLevel}
+            onChange={setEducationLevel}
+            idPrefix="form-edu-level"
+          />
+        </div>
+
+        {/* 4. Turma e Assunto */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label
@@ -1424,6 +1443,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                 <div className="flex justify-between">
                   <span className="text-slate-500">Turma:</span>
                   <span className="font-bold text-slate-900">{classGroup}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Nível / Segmento:</span>
+                  <EducationBadge level={educationLevel} size="xs" />
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Horário:</span>

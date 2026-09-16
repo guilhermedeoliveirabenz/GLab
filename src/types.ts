@@ -24,6 +24,57 @@ export interface Lab {
   broadcastMessage?: string; // Mensagem/aviso para o usuário no momento do agendamento
 }
 
+export type EducationLevel = 'basico' | 'superior' | 'ead' | 'outros';
+
+export const EDUCATION_LEVEL_LABELS: Record<EducationLevel, string> = {
+  basico: 'Ensino Básico',
+  superior: 'Ensino Superior',
+  ead: 'EAD',
+  outros: 'Outros',
+};
+
+export const EDUCATION_LEVEL_OPTIONS: {
+  id: EducationLevel;
+  label: string;
+  shortLabel: string;
+  description: string;
+  badgeClass: string;
+  dotColor: string;
+}[] = [
+  {
+    id: 'basico',
+    label: 'Ensino Básico',
+    shortLabel: 'Básico',
+    description: 'Fundamental, Médio e Técnico',
+    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    dotColor: 'bg-emerald-500',
+  },
+  {
+    id: 'superior',
+    label: 'Ensino Superior',
+    shortLabel: 'Superior',
+    description: 'Graduação e Pós-Graduação',
+    badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    dotColor: 'bg-indigo-500',
+  },
+  {
+    id: 'ead',
+    label: 'EAD',
+    shortLabel: 'EAD',
+    description: 'Educação a Distância e Polos',
+    badgeClass: 'bg-purple-50 text-purple-700 border-purple-200',
+    dotColor: 'bg-purple-500',
+  },
+  {
+    id: 'outros',
+    label: 'Outros',
+    shortLabel: 'Outros',
+    description: 'Treinamentos, Eventos e Reuniões',
+    badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
+    dotColor: 'bg-amber-500',
+  },
+];
+
 export type BookingStatus = 'pending' | 'confirmed' | 'rejected' | 'completed' | 'cancelled';
 
 export type ShiftType = 'manha' | 'tarde' | 'noite';
@@ -44,6 +95,7 @@ export interface Booking {
   whatsapp: string;
   classGroup: string;
   subject?: string;
+  educationLevel?: EducationLevel; // 'basico' | 'superior' | 'ead' | 'outros'
   labId: string;
   labName: string;
   isMobileLab: boolean;
@@ -87,6 +139,7 @@ export interface BookingFilter {
   status?: BookingStatus | 'all';
   search?: string;
   shift?: ShiftType | 'all';
+  educationLevel?: EducationLevel | 'all';
   onlyMobile?: boolean;
 }
 

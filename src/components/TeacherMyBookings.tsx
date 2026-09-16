@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Booking } from '../types';
 import { formatDateBR } from '../lib/whatsapp';
 import { useAuth } from '../lib/authContext';
+import { EducationBadge } from './EducationBadge';
 import {
   Search,
   Calendar,
@@ -320,10 +321,11 @@ export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
                     )}
                   </div>
 
-                  <p className="text-xs text-slate-700">
-                    <span className="font-semibold">{b.teacherName}</span> • Turma:{' '}
-                    <span className="font-semibold text-slate-900">{b.classGroup}</span>
-                    {b.subject ? ` • ${b.subject}` : ''}
+                  <p className="text-xs text-slate-700 flex items-center gap-1.5 flex-wrap">
+                    <span className="font-semibold">{b.teacherName}</span>
+                    <span>• Turma: <span className="font-semibold text-slate-900">{b.classGroup}</span></span>
+                    {b.educationLevel && <EducationBadge level={b.educationLevel} size="xs" />}
+                    {b.subject ? <span>• {b.subject}</span> : null}
                   </p>
 
                   <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">

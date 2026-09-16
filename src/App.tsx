@@ -10,6 +10,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { TeacherMyBookings } from './components/TeacherMyBookings';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { BookingCalendar } from './components/BookingCalendar';
+import { BatchImportModal } from './components/BatchImportModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { playNewBookingAlertSound } from './lib/soundUtils';
 import {
@@ -24,6 +25,7 @@ import {
   CalendarDays,
   Bell,
   X,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 function AppContent() {
@@ -34,6 +36,7 @@ function AppContent() {
   const [preselectedLabId, setPreselectedLabId] = useState<string>('lab-1');
   const [preselectedDate, setPreselectedDate] = useState<string>('');
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
   const [latestNewBookingAlert, setLatestNewBookingAlert] = useState<Booking | null>(null);
 
   const isInitialLoadRef = React.useRef(true);
@@ -201,21 +204,37 @@ function AppContent() {
                   Consulte a disponibilidade de todos os {labs.length} laboratórios e carrinhos por dia, semana ou mês
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab('booking');
-                  setPreselectedLabId('lab-1');
-                }}
-                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
-              >
-                <span>+ Fazer Agendamento</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {isAdmin && (
+                  <button
+                    id="calendar-top-batch-import-btn"
+                    type="button"
+                    onClick={() => setIsBatchImportOpen(true)}
+                    className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    title="Subir agendamento por lote a partir de planilha Excel ou grade semanal (Acesso TI & Admin)"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>Importar por Lote</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('booking');
+                    setPreselectedLabId('lab-1');
+                  }}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>+ Fazer Agendamento</span>
+                </button>
+              </div>
             </div>
 
             <BookingCalendar
               bookings={bookings}
               labs={labs}
+              onOpenBatchImport={isAdmin ? () => setIsBatchImportOpen(true) : undefined}
               onRequestNewBooking={(date) => {
                 setPreselectedDate(date);
                 setActiveTab('booking');
@@ -292,6 +311,15 @@ function AppContent() {
           </div>
         </div>
       )}
+
+      {/* Modal de Importação de Agendamentos por Lote (Exclusivo TI/Admin) */}
+      <BatchImportModal
+        isOpen={isBatchImportOpen}
+        onClose={() => setIsBatchImportOpen(false)}
+        labs={labs}
+        existingBookings={bookings}
+        onOpenLogin={() => setIsLoginModalOpen(true)}
+      />
 
       {/* Modal de Login Admin */}
       <AdminLoginModal

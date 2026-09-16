@@ -32,13 +32,16 @@ import {
   Check,
   X,
   Layers,
+  ChevronRight,
 } from 'lucide-react';
 import { WhatsAppModal } from './WhatsAppModal';
+import { BatchImportModal } from './BatchImportModal';
 import { TechnicianManagement } from './TechnicianManagement';
 import { BookingCalendar } from './BookingCalendar';
 import { ClearDataModal } from './ClearDataModal';
 import { LabManagementPanel } from './LabManagementPanel';
 import { AdminSecurityPanel } from './AdminSecurityPanel';
+import { EducationBadge } from './EducationBadge';
 import { useAuth } from '../lib/authContext';
 import { Lab } from '../types';
 import { playBookingConfirmedSound } from '../lib/soundUtils';
@@ -82,8 +85,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedEduLevel, setSelectedEduLevel] = useState<string>('all');
   const [isClearing, setIsClearing] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isBatchImportModalOpen, setIsBatchImportModalOpen] = useState(false);
 
   // WhatsApp Modal State
   const [activeWhatsAppBooking, setActiveWhatsAppBooking] = useState<Booking | null>(null);
@@ -117,6 +122,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
     if (selectedStatus !== 'all' && b.status !== selectedStatus) return false;
     if (selectedLabId !== 'all' && b.labId !== selectedLabId) return false;
     if (selectedDate && b.date !== selectedDate) return false;
+    if (selectedEduLevel !== 'all' && (b.educationLevel || 'outros') !== selectedEduLevel) return false;
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -125,8 +131,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
       const matchClass = b.classGroup.toLowerCase().includes(q);
       const matchLab = b.labName.toLowerCase().includes(q);
       const matchRoom = b.roomNumber?.toLowerCase().includes(q) || false;
+      const matchEdu = b.educationLevel?.toLowerCase().includes(q) || false;
       const matchPhone = phoneDigits ? b.whatsapp.replace(/\D/g, '').includes(phoneDigits) : false;
-      return matchName || matchClass || matchLab || matchRoom || matchPhone;
+      return matchName || matchClass || matchLab || matchRoom || matchEdu || matchPhone;
     }
 
     return true;
@@ -197,6 +204,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
         onConfirmAndSend={handleConfirmAndSendWhatsApp}
       />
 
+      {/* Modal de Importação por Lote (Planilhas / Grade) */}
+      <BatchImportModal
+        isOpen={isBatchImportModalOpen}
+        onClose={() => setIsBatchImportModalOpen(false)}
+        labs={labs}
+        existingBookings={bookings}
+      />
+
       {/* Top Banner with Admin User info & Quick Tools */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -223,6 +238,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-center">
+          <button
+            id="admin-top-batch-import-btn"
+            type="button"
+            onClick={() => setIsBatchImportModalOpen(true)}
+            title="Importar agendamentos em lote por planilha Excel/CSV ou colar da grade semanal"
+            className="px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Importar por Lote</span>
+          </button>
+
           <button
             id="admin-clear-bookings-btn"
             type="button"
@@ -485,6 +511,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
               <span>+ Módulos</span>
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isMenuDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
+
+            <button
+              id="admin-quick-batch-import-btn"
+              type="button"
+              onClick={() => {
+                setIsBatchImportModalOpen(true);
+                setIsMenuDropdownOpen(false);
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer shadow-2xs"
+              title="Subir agendamento por lote via planilha"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Importar Lote</span>
+            </button>
           </div>
         </div>
 
@@ -675,6 +715,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                     </div>
                   </div>
                   {activeTab === 'mobile_route' && <Check className="w-4 h-4 text-rose-600 shrink-0 mt-1" />}
+                </button>
+
+                <button
+                  id="tab-batch-import-menu-item"
+                  type="button"
+                  onClick={() => {
+                    setIsBatchImportModalOpen(true);
+                    setIsMenuDropdownOpen(false);
+                  }}
+                  className="p-3 rounded-xl border border-emerald-200 hover:border-emerald-400 bg-emerald-50/40 hover:bg-emerald-50 text-left transition-all flex items-start justify-between gap-2.5 cursor-pointer sm:col-span-2"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
+                      <FileSpreadsheet className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900">Importação por Lote (Planilha / Grade)</span>
+                        <span className="px-1.5 py-0.2 text-[10px] font-bold bg-emerald-200 text-emerald-900 rounded-full">
+                          Excel / Grade
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600">
+                        Suba ou cole grades semanais (Hor x Dias) e gere agendamentos automaticamente
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-emerald-700 text-xs font-bold shrink-0 mt-1 flex items-center gap-0.5">
+                    <span>Abrir</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </div>
                 </button>
               </div>
             </div>
@@ -987,6 +1058,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                 </select>
               </div>
             )}
+
+            {/* Filter by Education Level */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-700 font-medium">Segmento:</span>
+              <select
+                id="admin-filter-edu-level"
+                value={selectedEduLevel}
+                onChange={(e) => setSelectedEduLevel(e.target.value)}
+                className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+              >
+                <option value="all">Todos os Segmentos</option>
+                <option value="basico">Ensino Básico</option>
+                <option value="superior">Ensino Superior</option>
+                <option value="ead">EAD</option>
+                <option value="outros">Outros</option>
+              </select>
+            </div>
           </div>
 
           {/* Roteiro Móvel Warning Banner if in mobile route tab */}
@@ -1113,9 +1201,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                               )}
                               <span>{b.labName}</span>
                             </div>
-                            <div className="text-slate-600 text-xs mt-0.5">
-                              Turma: <span className="font-medium text-slate-800">{b.classGroup}</span>
-                              {b.subject && ` • ${b.subject}`}
+                            <div className="text-slate-600 text-xs mt-0.5 flex items-center gap-1.5 flex-wrap">
+                              <span>Turma: <span className="font-medium text-slate-800">{b.classGroup}</span></span>
+                              {b.educationLevel && <EducationBadge level={b.educationLevel} size="xs" />}
+                              {b.subject && <span className="text-slate-500">• {b.subject}</span>}
                             </div>
                             {b.recurrenceGroupId && (
                               <div className="text-[10px] text-indigo-700 font-bold mt-0.5 flex items-center gap-1">
@@ -1321,8 +1410,9 @@ const ScheduleMatrixView: React.FC<{
                         }`}
                       >
                         <div className="font-bold truncate">{booking.teacherName}</div>
-                        <div className="text-[10px] truncate text-slate-600">
-                          {booking.classGroup}
+                        <div className="text-[10px] truncate text-slate-600 flex items-center gap-1 justify-between">
+                          <span className="truncate">{booking.classGroup}</span>
+                          {booking.educationLevel && <EducationBadge level={booking.educationLevel} size="xs" />}
                         </div>
                         {booking.isMobileLab && (
                           <div className="text-[10px] font-bold text-rose-700 truncate">

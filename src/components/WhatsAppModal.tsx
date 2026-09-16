@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Booking } from '../types';
 import { generateWhatsAppMessage, getWhatsAppSendUrl, sanitizeWhatsAppPhone } from '../lib/whatsapp';
+import { EducationBadge } from './EducationBadge';
 import { MessageSquare, Send, Copy, Check, ExternalLink, X, AlertCircle } from 'lucide-react';
 
 interface WhatsAppModalProps {
@@ -101,9 +102,10 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
             </div>
             <div>
               <p className="text-xs text-slate-700 uppercase font-semibold">Laboratório & Turma</p>
-              <p className="font-medium text-slate-900">
-                {booking.labName} • <span className="text-slate-600">{booking.classGroup}</span>
-              </p>
+              <div className="flex items-center gap-1.5 font-medium text-slate-900 mt-0.5 flex-wrap">
+                <span>{booking.labName} • <span className="text-slate-600">{booking.classGroup}</span></span>
+                {booking.educationLevel && <EducationBadge level={booking.educationLevel} size="xs" />}
+              </div>
               <p className="text-xs text-slate-700 mt-0.5">
                 {booking.date} • {booking.timeSlot}
               </p>

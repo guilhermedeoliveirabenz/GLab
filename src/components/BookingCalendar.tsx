@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Booking, LAB_LIST, Lab } from '../types';
+import { Booking, LAB_LIST, Lab, EducationLevel } from '../types';
+import { EducationBadge } from './EducationBadge';
 import { formatDateBR } from '../lib/whatsapp';
 import {
   getBookingDateLimits,
@@ -30,6 +31,7 @@ import {
   Wrench,
   AlertTriangle,
   Info,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface BookingCalendarProps {
@@ -37,6 +39,7 @@ interface BookingCalendarProps {
   labs?: Lab[];
   onSelectBooking?: (booking: Booking) => void;
   onRequestNewBooking?: (date: string) => void;
+  onOpenBatchImport?: () => void;
 }
 
 type CalendarViewMode = 'day' | 'week' | 'month';
@@ -46,11 +49,13 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   labs = LAB_LIST,
   onSelectBooking,
   onRequestNewBooking,
+  onOpenBatchImport,
 }) => {
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [selectedShift, setSelectedShift] = useState<string>('all');
+  const [selectedEduLevel, setSelectedEduLevel] = useState<string>('all');
   const [activeBookingModal, setActiveBookingModal] = useState<Booking | null>(null);
   const [selectedMaintenanceLabModal, setSelectedMaintenanceLabModal] = useState<Lab | null>(null);
 
@@ -90,6 +95,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   const filteredBookings = bookings.filter((b) => {
     if (selectedLabId !== 'all' && b.labId !== selectedLabId) return false;
     if (selectedShift !== 'all' && b.shift !== selectedShift) return false;
+    if (selectedEduLevel !== 'all' && (b.educationLevel || 'outros') !== selectedEduLevel) return false;
     return true;
   });
 
@@ -348,7 +354,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
             className="text-xs py-2 px-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 text-slate-700 font-medium"
           >
             <option value="all">Todos os Laboratórios</option>
-            {LAB_LIST.map((lab) => (
+            {labs.map((lab) => (
               <option key={lab.id} value={lab.id}>
                 {lab.name}
               </option>
@@ -367,6 +373,34 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
             <option value="tarde">Tarde</option>
             <option value="noite">Noite</option>
           </select>
+
+          {/* Education Level Filter */}
+          <select
+            id="calendar-filter-edu-level"
+            value={selectedEduLevel}
+            onChange={(e) => setSelectedEduLevel(e.target.value)}
+            className="text-xs py-2 px-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 text-slate-700 font-medium"
+          >
+            <option value="all">Todos os Segmentos</option>
+            <option value="basico">Ensino Básico</option>
+            <option value="superior">Ensino Superior</option>
+            <option value="ead">EAD</option>
+            <option value="outros">Outros</option>
+          </select>
+
+          {/* Botão de Importação por Lote */}
+          {onOpenBatchImport && (
+            <button
+              id="calendar-open-batch-import-btn"
+              type="button"
+              onClick={onOpenBatchImport}
+              className="text-xs py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+              title="Importar agendamentos em lote por planilha Excel ou grade semanal"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Importar Lote</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -526,6 +560,20 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                         {b.recurrenceGroupId && (
                           <Repeat className="w-2.5 h-2.5 text-indigo-600 shrink-0" title="Agendamento Recorrente" />
                         )}
+                        {b.educationLevel && (
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              b.educationLevel === 'basico'
+                                ? 'bg-emerald-500'
+                                : b.educationLevel === 'superior'
+                                ? 'bg-indigo-500'
+                                : b.educationLevel === 'ead'
+                                ? 'bg-purple-500'
+                                : 'bg-amber-500'
+                            }`}
+                            title={`Nível: ${b.educationLevel}`}
+                          />
+                        )}
                         <span className="truncate">{b.startTime ? `${b.startTime} ` : ''}{b.labName}</span>
                       </button>
                     ))}
@@ -680,8 +728,13 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                             {b.teacherName}
                           </div>
 
-                          <div className="text-[10px] text-slate-500 truncate">
-                            Turma: {b.classGroup}
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="text-[10px] text-slate-500 truncate flex-1">
+                              Turma: {b.classGroup}
+                            </div>
+                            {b.educationLevel && (
+                              <EducationBadge level={b.educationLevel} size="xs" />
+                            )}
                           </div>
 
                           {b.isMobileLab && b.roomNumber && (
@@ -854,8 +907,13 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                           </span>
                         </div>
 
-                        <div className="text-[11px] text-slate-500">
-                          <strong>Turma:</strong> {booking.classGroup}
+                        <div className="flex items-center justify-between">
+                          <div className="text-[11px] text-slate-500">
+                            <strong>Turma:</strong> {booking.classGroup}
+                          </div>
+                          {booking.educationLevel && (
+                            <EducationBadge level={booking.educationLevel} size="xs" />
+                          )}
                         </div>
 
                         {booking.requestedMachines && (
@@ -931,7 +989,10 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-400">Turma: </span>
-                  <span>{activeBookingModal.classGroup}</span>
+                  <span className="font-semibold text-slate-900 mr-2">{activeBookingModal.classGroup}</span>
+                  {activeBookingModal.educationLevel && (
+                    <EducationBadge level={activeBookingModal.educationLevel} size="xs" />
+                  )}
                 </div>
                 {activeBookingModal.subject && (
                   <div>

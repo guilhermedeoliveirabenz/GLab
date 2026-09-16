@@ -8,6 +8,7 @@ import {
   query,
   orderBy,
   getDocs,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Booking } from '../types';
@@ -214,6 +215,55 @@ export async function createRecurringBookings(
     createdList.push(b);
   }
 
+  const newIds = new Set(createdList.map((b) => b.id));
+  const current = getLocalCache().filter((b) => !newIds.has(b.id));
+  const updated = deduplicateBookings([...createdList, ...current]);
+  setLocalCache(updated);
+
+  return createdList;
+}
+
+/**
+ * Cria múltiplos agendamentos em lote (batch import) no Firestore e no cache local
+ */
+export async function createBatchBookings(
+  items: Array<Omit<Booking, 'id' | 'createdAt' | 'whatsappSent'> & { id?: string; status?: Booking['status'] }>,
+  defaultStatus: Booking['status'] = 'confirmed'
+): Promise<Booking[]> {
+  const now = Date.now();
+  const createdList: Booking[] = items.map((item, index) => {
+    const id = item.id || `batch-${now}-${index}-${Math.random().toString(36).substring(2, 7)}`;
+    const status = item.status || defaultStatus;
+    return {
+      ...item,
+      id,
+      createdAt: now + index,
+      status,
+      confirmedAt: status === 'confirmed' ? now : undefined,
+      whatsappSent: false,
+    };
+  });
+
+  // Salva no Firestore usando writeBatch em blocos seguros (até 400 por commit)
+  if (db) {
+    try {
+      const CHUNK_SIZE = 400;
+      for (let i = 0; i < createdList.length; i += CHUNK_SIZE) {
+        const chunk = createdList.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        for (const item of chunk) {
+          const payload = cleanObjectForFirestore(item);
+          batch.set(doc(db, COLLECTION_NAME, item.id), payload);
+        }
+        await batch.commit();
+      }
+      console.log(`${createdList.length} agendamentos gravados com sucesso em lote no Firestore.`);
+    } catch (err) {
+      console.error('Falha ao salvar agendamentos em lote no Firestore:', err);
+    }
+  }
+
+  // Atualiza cache local
   const newIds = new Set(createdList.map((b) => b.id));
   const current = getLocalCache().filter((b) => !newIds.has(b.id));
   const updated = deduplicateBookings([...createdList, ...current]);
