@@ -624,6 +624,182 @@ export const SAMPLE_IMAGE_SCHEDULE_MATRIX: string[][] = [
 ];
 
 /**
+ * Formata número de celular/WhatsApp para o padrão brasileiro (XX) 9XXXX-XXXX
+ */
+export function formatPhoneNumber(raw: string): string {
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  } else if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  } else if (digits.length === 13 && digits.startsWith('55')) {
+    const d = digits.slice(2);
+    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  } else if (digits.length === 12 && digits.startsWith('55')) {
+    const d = digits.slice(2);
+    return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  }
+  return raw.trim();
+}
+
+/**
+ * Valida se é um telefone brasileiro com DDD aceitável
+ */
+export function isValidPhoneNumber(phone: string): boolean {
+  if (!phone) return false;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 11;
+}
+
+/**
+ * Converte data de planilha (DD/MM/AAAA, AAAA-MM-DD ou serial numérico do Excel) para YYYY-MM-DD
+ */
+export function parseSpreadsheetDate(val: any, fallbackDate: string): string {
+  if (val === null || val === undefined || val === '') return fallbackDate;
+
+  // Número serial de data do Excel
+  if (typeof val === 'number' || (!isNaN(Number(val)) && !String(val).includes('/') && !String(val).includes('-'))) {
+    const serial = Number(val);
+    if (serial > 20000 && serial < 90000) {
+      const utcDays = serial - 25569;
+      const utcValue = utcDays * 86400;
+      const dateInfo = new Date(utcValue * 1000);
+      return dateInfo.toISOString().split('T')[0];
+    }
+  }
+
+  const str = String(val).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+
+  const brMatch = str.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})/);
+  if (brMatch) {
+    const day = brMatch[1].padStart(2, '0');
+    const month = brMatch[2].padStart(2, '0');
+    const year = brMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString().split('T')[0];
+  }
+
+  return fallbackDate;
+}
+
+/**
+ * Matriz modelo em Lista / Tabela contendo Nome do Professor, Matéria e Número de Celular
+ */
+export const SAMPLE_TEACHER_LIST_MATRIX: string[][] = [
+  [
+    'Nome do Professor',
+    'Matéria / Disciplina',
+    'Número do Celular',
+    'Data (DD/MM/AAAA)',
+    'Horário Início',
+    'Horário Fim',
+    'Turma',
+    'Laboratório (Opcional)',
+    'Segmento (Opcional)',
+    'Observações (Opcional)',
+  ],
+  [
+    'Prof. Carlos Eduardo Silva',
+    'Robótica e Tecnologias Digitais',
+    '(11) 98765-4321',
+    '28/09/2026',
+    '07:30',
+    '11:55',
+    '3º Ano Médio A',
+    'Laboratório 1',
+    'Ensino Médio',
+    'Software Arduino IDE e simulador',
+  ],
+  [
+    'Profa. Ana Carolina Mendes',
+    'Design Gráfico e Criação Digital',
+    '(11) 99123-4567',
+    '28/09/2026',
+    '13:15',
+    '17:40',
+    'Design 4º Semestre',
+    'Laboratório 2',
+    'Ensino Superior',
+    'Pacote Adobe e mesa digitalizadora',
+  ],
+  [
+    'Prof. Roberto Almeida',
+    'Desenvolvimento Web e Algoritmos',
+    '(11) 97654-3210',
+    '29/09/2026',
+    '19:00',
+    '22:15',
+    'Sistemas de Informação 2A',
+    'Laboratório 3',
+    'Ensino Superior',
+    'Instalar VS Code e Node.js',
+  ],
+  [
+    'Profa. Juliana Martins',
+    'Pesquisa Científica e Biologia',
+    '(11) 98111-2233',
+    '30/09/2026',
+    '07:30',
+    '11:55',
+    '2º Ano Médio B',
+    'Laboratório Móvel 1',
+    'Ensino Médio',
+    'Carrinho com 32 notebooks na Sala 204',
+  ],
+  [
+    'Prof. Fernando Dias',
+    'Práticas de Contabilidade e Finanças',
+    '(11) 99345-6789',
+    '01/10/2026',
+    '19:00',
+    '22:15',
+    'Ciências Contábeis 6B',
+    'Laboratório 1',
+    'Ensino Superior',
+    'Acesso a planilhas e simulador contábil',
+  ],
+];
+
+/**
+ * Gera e baixa uma planilha modelo oficial do Excel (.xlsx ou .csv)
+ * com colunas organizadas para: Nome do Professor, Matéria / Disciplina, Número do Celular, etc.
+ */
+export function downloadTeacherTemplateFile(format: 'xlsx' | 'csv' = 'xlsx') {
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(SAMPLE_TEACHER_LIST_MATRIX);
+
+  ws['!cols'] = [
+    { wch: 30 }, // Nome do Professor
+    { wch: 34 }, // Matéria / Disciplina
+    { wch: 22 }, // Número do Celular (WhatsApp)
+    { wch: 18 }, // Data (DD/MM/AAAA)
+    { wch: 15 }, // Horário Início
+    { wch: 15 }, // Horário Fim
+    { wch: 22 }, // Turma
+    { wch: 24 }, // Laboratório (Opcional)
+    { wch: 18 }, // Segmento (Opcional)
+    { wch: 32 }, // Observações (Opcional)
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Agendamento_Professores');
+
+  if (format === 'csv') {
+    XLSX.writeFile(wb, 'modelo_importacao_professores.csv', { bookType: 'csv' });
+  } else {
+    XLSX.writeFile(wb, 'modelo_importacao_professores.xlsx');
+  }
+}
+
+/**
  * Gera e baixa uma planilha modelo do Excel (.xlsx) com a estrutura da imagem
  */
 export function downloadSampleExcelFile() {
@@ -642,4 +818,286 @@ export function downloadSampleExcelFile() {
 
   XLSX.utils.book_append_sheet(wb, ws, 'Grade_Horarios');
   XLSX.writeFile(wb, 'modelo_grade_laboratorios.xlsx');
+}
+
+/**
+ * Normaliza nome de cabeçalho removendo acentos e espaços
+ */
+function normalizeHeaderName(name: string): string {
+  return (name || '')
+    .toString()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Verifica se a matriz fornecida é uma tabela colunar (Lista com colunas Professor, Matéria, Celular...)
+ */
+export function isTabularMatrix(matrix: string[][]): boolean {
+  if (!matrix || matrix.length < 2) return false;
+
+  for (let r = 0; r < Math.min(matrix.length, 5); r++) {
+    const row = matrix[r];
+    if (!row) continue;
+
+    let matchedKeywords = 0;
+    row.forEach((cell) => {
+      const norm = normalizeHeaderName(String(cell));
+      if (
+        norm.includes('professor') ||
+        norm.includes('docente') ||
+        norm.includes('educador') ||
+        norm.includes('materia') ||
+        norm.includes('disciplina') ||
+        norm.includes('assunto') ||
+        norm.includes('celular') ||
+        norm.includes('whatsapp') ||
+        norm.includes('telefone') ||
+        norm.includes('contato') ||
+        norm.includes('turma')
+      ) {
+        matchedKeywords++;
+      }
+    });
+
+    if (matchedKeywords >= 2) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Analisa uma planilha em formato Lista / Tabela (com colunas de Professor, Matéria, Celular, etc.)
+ */
+export function parseTabularBookingsMatrix(
+  matrix: string[][],
+  targetLab: Lab,
+  allLabs: Lab[] = [],
+  fallbackDate: string,
+  existingBookings: Booking[] = [],
+  defaultEducationLevel: EducationLevel = 'basico'
+): BatchBookingCandidate[] {
+  if (!matrix || matrix.length < 2) return [];
+
+  // Localiza a linha de cabeçalho
+  let headerRowIndex = -1;
+  let colTeacher = -1;
+  let colSubject = -1;
+  let colPhone = -1;
+  let colDate = -1;
+  let colDayOfWeek = -1;
+  let colStartTime = -1;
+  let colEndTime = -1;
+  let colTimeSlot = -1;
+  let colClassGroup = -1;
+  let colLab = -1;
+  let colEducation = -1;
+  let colNotes = -1;
+
+  for (let r = 0; r < Math.min(matrix.length, 6); r++) {
+    const row = matrix[r];
+    if (!row) continue;
+
+    let tCol = -1;
+    let sCol = -1;
+    let pCol = -1;
+    let dCol = -1;
+    let stCol = -1;
+    let etCol = -1;
+    let tsCol = -1;
+    let cCol = -1;
+    let lCol = -1;
+    let edCol = -1;
+    let nCol = -1;
+    let dwCol = -1;
+
+    row.forEach((val, c) => {
+      const norm = normalizeHeaderName(String(val));
+      if (!norm) return;
+
+      if (norm.includes('professor') || norm.includes('docente') || norm.includes('educador') || norm.includes('instrutor')) {
+        tCol = c;
+      } else if (norm.includes('materia') || norm.includes('disciplina') || norm.includes('assunto') || norm.includes('conteudo')) {
+        sCol = c;
+      } else if (
+        norm.includes('celular') ||
+        norm.includes('whatsapp') ||
+        norm.includes('whats') ||
+        norm.includes('telefone') ||
+        norm.includes('contato') ||
+        norm.includes('fone') ||
+        norm.includes('tel')
+      ) {
+        pCol = c;
+      } else if (norm === 'data' || norm.includes('datadaaula') || norm.includes('datareserva') || norm.startsWith('data')) {
+        dCol = c;
+      } else if (norm.includes('diadasemana') || norm === 'dia' || norm === 'semana') {
+        dwCol = c;
+      } else if (norm.includes('inicio') || norm.includes('horainicio') || norm.includes('horarioinicio') || norm === 'de') {
+        stCol = c;
+      } else if (norm.includes('fim') || norm.includes('termino') || norm.includes('horafim') || norm.includes('horariofim') || norm === 'ate') {
+        etCol = c;
+      } else if (norm.includes('horario') || norm === 'hora' || norm === 'periodo') {
+        tsCol = c;
+      } else if (norm.includes('turma') || norm.includes('classe') || norm.includes('serie') || norm.includes('grupo') || norm.includes('ano')) {
+        cCol = c;
+      } else if (norm.includes('laboratorio') || norm.includes('lab') || norm.includes('sala') || norm.includes('espaco')) {
+        lCol = c;
+      } else if (norm.includes('segmento') || norm.includes('nivel') || norm.includes('etapa') || norm.includes('grau')) {
+        edCol = c;
+      } else if (norm.includes('observacao') || norm.includes('observacoes') || norm.includes('obs') || norm.includes('notas')) {
+        nCol = c;
+      } else if (norm === 'nome' && tCol === -1) {
+        tCol = c;
+      }
+    });
+
+    // Se encontrou pelo menos Professor ou Matéria ou Celular
+    if ((tCol !== -1 && sCol !== -1) || (tCol !== -1 && pCol !== -1) || (sCol !== -1 && pCol !== -1) || (tCol !== -1 && dCol !== -1)) {
+      headerRowIndex = r;
+      colTeacher = tCol;
+      colSubject = sCol;
+      colPhone = pCol;
+      colDate = dCol;
+      colDayOfWeek = dwCol;
+      colStartTime = stCol;
+      colEndTime = etCol;
+      colTimeSlot = tsCol;
+      colClassGroup = cCol;
+      colLab = lCol;
+      colEducation = edCol;
+      colNotes = nCol;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    return [];
+  }
+
+  const candidates: BatchBookingCandidate[] = [];
+
+  for (let r = headerRowIndex + 1; r < matrix.length; r++) {
+    const row = matrix[r];
+    if (!row || row.length === 0) continue;
+
+    // Ignora linha vazia
+    const hasData = row.some((c) => c !== null && c !== undefined && String(c).trim().length > 0);
+    if (!hasData) continue;
+
+    const teacherRaw = colTeacher !== -1 && row[colTeacher] ? String(row[colTeacher]).trim() : '';
+    const subjectRaw = colSubject !== -1 && row[colSubject] ? String(row[colSubject]).trim() : '';
+    const phoneRaw = colPhone !== -1 && row[colPhone] ? String(row[colPhone]).trim() : '';
+    const classGroupRaw = colClassGroup !== -1 && row[colClassGroup] ? String(row[colClassGroup]).trim() : '';
+    const dateRaw = colDate !== -1 && row[colDate] ? row[colDate] : '';
+    const labRaw = colLab !== -1 && row[colLab] ? String(row[colLab]).trim() : '';
+    const educationRaw = colEducation !== -1 && row[colEducation] ? String(row[colEducation]).trim() : '';
+    const notesRaw = colNotes !== -1 && row[colNotes] ? String(row[colNotes]).trim() : '';
+
+    if (!teacherRaw && !subjectRaw) {
+      continue; // Linha sem professor nem matéria
+    }
+
+    // Horários
+    let startTime = '07:30';
+    let endTime = '11:55';
+
+    if (colStartTime !== -1 && row[colStartTime]) {
+      startTime = normalizeTimeString(String(row[colStartTime]));
+    }
+    if (colEndTime !== -1 && row[colEndTime]) {
+      endTime = normalizeTimeString(String(row[colEndTime]));
+    } else if (colTimeSlot !== -1 && row[colTimeSlot]) {
+      const slotText = String(row[colTimeSlot]);
+      const matchTimes = slotText.match(/(\d{1,2}:\d{2})\s*(?:às|as|-|ate|até)\s*(\d{1,2}:\d{2})/i);
+      if (matchTimes) {
+        startTime = normalizeTimeString(matchTimes[1]);
+        endTime = normalizeTimeString(matchTimes[2]);
+      } else {
+        startTime = normalizeTimeString(slotText);
+        endTime = addMinutesToTime(startTime, 50);
+      }
+    } else if (colStartTime !== -1 && row[colStartTime]) {
+      endTime = addMinutesToTime(startTime, 50);
+    }
+
+    // Data
+    const dateStr = parseSpreadsheetDate(dateRaw, fallbackDate);
+    const dateObj = new Date(dateStr + 'T12:00:00Z');
+    const dayOfWeekIndex = !isNaN(dateObj.getTime()) ? dateObj.getUTCDay() : 1;
+    const dayOfWeekName = DAY_NAMES_BY_INDEX[dayOfWeekIndex] || 'Segunda-feira';
+
+    // Laboratório: tenta casar com allLabs ou usa targetLab
+    let assignedLab = targetLab;
+    if (labRaw && allLabs.length > 0) {
+      const cleanLab = labRaw.toLowerCase().replace(/[-_.]/g, ' ').trim();
+      const foundLab = allLabs.find(
+        (l) =>
+          l.name.toLowerCase().includes(cleanLab) ||
+          cleanLab.includes(l.name.toLowerCase()) ||
+          l.id.toLowerCase() === cleanLab
+      );
+      if (foundLab) {
+        assignedLab = foundLab;
+      }
+    }
+
+    // Segmento educacional
+    let eduLevel = defaultEducationLevel;
+    if (educationRaw) {
+      const eClean = educationRaw.toLowerCase();
+      if (eClean.includes('superior') || eClean.includes('gradua')) eduLevel = 'superior';
+      else if (eClean.includes('ead') || eClean.includes('distancia')) eduLevel = 'ead';
+      else if (eClean.includes('medio') || eClean.includes('médio') || eClean.includes('fundamental') || eClean.includes('basico') || eClean.includes('básico')) eduLevel = 'basico';
+    } else {
+      eduLevel = detectEducationLevel(classGroupRaw, subjectRaw) || defaultEducationLevel;
+    }
+
+    // Celular / WhatsApp
+    const formattedPhone = formatPhoneNumber(phoneRaw) || (phoneRaw ? phoneRaw : '(00) 00000-0000');
+
+    const shift = getShiftFromTime(startTime);
+    const timeSlotStr = `${startTime} às ${endTime}`;
+
+    // Conflitos
+    const conflict = existingBookings.find(
+      (b) =>
+        b.labId === assignedLab.id &&
+        b.date === dateStr &&
+        b.status !== 'rejected' &&
+        b.status !== 'cancelled' &&
+        ((b.startTime && b.endTime && !(endTime <= b.startTime || startTime >= b.endTime)) ||
+          b.timeSlot === timeSlotStr)
+    );
+
+    candidates.push({
+      tempId: `cand-tab-${r}-${Math.random().toString(36).substring(2, 6)}`,
+      selected: !conflict,
+      date: dateStr,
+      dayOfWeekName,
+      startTime,
+      endTime,
+      timeSlot: timeSlotStr,
+      shift,
+      labId: assignedLab.id,
+      labName: assignedLab.name,
+      isMobileLab: assignedLab.isMobile,
+      teacherName: teacherRaw || 'Professor a confirmar',
+      classGroup: classGroupRaw || 'Geral',
+      subject: subjectRaw || 'Aula Prática',
+      whatsapp: formattedPhone,
+      educationLevel: eduLevel,
+      notes: notesRaw || undefined,
+      hasConflict: !!conflict,
+      conflictDetails: conflict
+        ? `Já reservado para ${conflict.teacherName} (${conflict.subject || 'Aula'}) às ${conflict.timeSlot}`
+        : undefined,
+    });
+  }
+
+  return candidates;
 }

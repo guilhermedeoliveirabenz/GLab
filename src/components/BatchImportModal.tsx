@@ -18,6 +18,9 @@ import {
   Shield,
   ShieldAlert,
   Lock,
+  Phone,
+  FileDown,
+  Table,
 } from 'lucide-react';
 import { Booking, Lab, LAB_LIST, EducationLevel } from '../types';
 import { EducationBadge } from './EducationBadge';
@@ -29,7 +32,13 @@ import {
   generateBookingsForSingleWeek,
   generateBookingsForSemesterRange,
   downloadSampleExcelFile,
+  downloadTeacherTemplateFile,
   SAMPLE_IMAGE_SCHEDULE_MATRIX,
+  SAMPLE_TEACHER_LIST_MATRIX,
+  isTabularMatrix,
+  parseTabularBookingsMatrix,
+  formatPhoneNumber,
+  isValidPhoneNumber,
   BatchBookingCandidate,
 } from '../lib/batchScheduleParser';
 import { createBatchBookings } from '../lib/bookingService';
@@ -107,11 +116,36 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
   const processMatrix = (matrixToUse: string[][]) => {
     try {
       setParseError(null);
+
+      // 1. Verifica se é o formato Lista / Tabela (Professor, Matéria, Celular...)
+      if (isTabularMatrix(matrixToUse)) {
+        const generated = parseTabularBookingsMatrix(
+          matrixToUse,
+          currentLab,
+          labs,
+          applicationMode === 'single_week' ? weekStartDate : semesterStartDate,
+          existingBookings,
+          batchEducationLevel
+        );
+
+        if (generated.length === 0) {
+          setParseError(
+            'Não foram identificadas linhas válidas com Nome do Professor ou Matéria na planilha. Baixe o modelo oficial com colunas de Nome do Professor, Matéria e Número do Celular.'
+          );
+          setCandidates([]);
+          return;
+        }
+
+        setCandidates(generated);
+        return;
+      }
+
+      // 2. Formato Grade Semanal (Horário x Seg, Ter, Qua, Qui, Sex)
       const slots = parseWeeklyGridMatrix(matrixToUse);
 
       if (slots.length === 0) {
         setParseError(
-          'Não foram identificadas colunas de dias da semana (Seg, Ter, Qua, Qui...) ou horários válidos na grade. Verifique a estrutura da planilha.'
+          'Não foram identificadas colunas de dias da semana (Seg, Ter, Qua, Qui...) nem colunas de Professor/Matéria/Celular. Baixe o modelo oficial para conferir a estrutura recomendada.'
         );
         setCandidates([]);
         return;
@@ -191,6 +225,14 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
     processMatrix(SAMPLE_IMAGE_SCHEDULE_MATRIX);
   };
 
+  // Carrega o exemplo modelo com Professor, Matéria e Celular
+  const handleLoadSampleTeachers = () => {
+    setParseError(null);
+    setRawMatrix(SAMPLE_TEACHER_LIST_MATRIX);
+    setUploadedFileName('Exemplo: Professores, Matérias e Celulares');
+    processMatrix(SAMPLE_TEACHER_LIST_MATRIX);
+  };
+
   // Re-processa quando filtros de data/lab mudam e já temos uma matriz carregada
   const handleReapplyFilters = () => {
     if (rawMatrix) {
@@ -225,6 +267,9 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
   const conflictCount = candidates.filter((c) => c.hasConflict).length;
   const uniqueTeachersCount = new Set(candidates.map((c) => c.teacherName)).size;
   const uniqueSubjectsCount = new Set(candidates.map((c) => c.subject)).size;
+  const validPhonesCount = candidates.filter(
+    (c) => c.whatsapp && c.whatsapp !== '(00) 00000-0000' && isValidPhoneNumber(c.whatsapp)
+  ).length;
 
   // Confirmar e salvar todos os agendamentos selecionados
   const handleConfirmImport = async () => {
@@ -402,36 +447,80 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
             <>
               {/* Etapa 1: Métodos de Entrada de Dados */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                  <div>
-                    <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider block">
-                      Passo 1
-                    </span>
-                    <h4 className="text-sm font-bold text-slate-900">
-                      Entrada dos Dados da Grade / Planilha
-                    </h4>
+                {/* Cabeçalho Passo 1 com Modelos para Download */}
+                <div className="space-y-3 border-b border-slate-100 pb-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider block">
+                        Passo 1
+                      </span>
+                      <h4 className="text-sm font-bold text-slate-900">
+                        Entrada dos Dados da Grade / Planilha
+                      </h4>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Botão Baixar Modelo de Professores */}
+                      <button
+                        type="button"
+                        onClick={() => downloadTeacherTemplateFile('xlsx')}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        title="Baixar planilha com colunas: Nome do Professor, Matéria e Celular"
+                      >
+                        <FileDown className="w-3.5 h-3.5" />
+                        <span>Baixar Modelo (.xlsx)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => downloadTeacherTemplateFile('csv')}
+                        className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Baixar modelo em formato CSV"
+                      >
+                        <Download className="w-3.5 h-3.5 text-slate-500" />
+                        <span>CSV</span>
+                      </button>
+
+                      {/* Botão Testar com Exemplo de Professores */}
+                      <button
+                        type="button"
+                        onClick={handleLoadSampleTeachers}
+                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                        title="Carregar exemplo preenchido com Professor, Matéria e Celular"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Carregar Exemplo de Professores</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleLoadSampleFromImage}
-                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
-                      title="Carrega os dados exatamente como exibidos na imagem enviada"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Carregar Exemplo da Imagem</span>
-                    </button>
+                  {/* Banner Explicativo do Modelo com Professor, Matéria e Celular */}
+                  <div className="bg-linear-to-r from-blue-50/80 to-indigo-50/60 border border-blue-100 rounded-xl p-3 text-xs text-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-2">
+                      <Table className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-slate-900">
+                          Estrutura do Modelo de Importação (Colunas):
+                        </p>
+                        <p className="text-[11px] text-slate-600 mt-0.5">
+                          <strong className="text-blue-900">1. Nome do Professor</strong> &bull;{' '}
+                          <strong className="text-blue-900">2. Matéria / Disciplina</strong> &bull;{' '}
+                          <strong className="text-emerald-800">3. Número do Celular (WhatsApp)</strong> &bull;{' '}
+                          4. Data &bull; 5. Início &bull; 6. Fim &bull; 7. Turma &bull; 8. Lab
+                        </p>
+                      </div>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={downloadSampleExcelFile}
-                      className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
-                      title="Baixar modelo do Excel formatado"
-                    >
-                      <Download className="w-3.5 h-3.5 text-slate-500" />
-                      <span>Modelo Excel</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={downloadSampleExcelFile}
+                        className="text-[11px] text-slate-500 hover:text-slate-800 underline font-medium cursor-pointer"
+                        title="Baixar modelo em grade horária (Seg a Sex)"
+                      >
+                        Modelo alternativo (Grade semanal)
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -785,12 +874,12 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
                       </span>
                     </div>
 
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                      <span className="text-[10px] font-bold uppercase text-slate-600 block">
-                        Disciplinas
+                    <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                      <span className="text-[10px] font-bold uppercase text-emerald-700 block">
+                        Celular / WhatsApp
                       </span>
-                      <span className="text-lg font-bold text-slate-900">
-                        {uniqueSubjectsCount}
+                      <span className="text-lg font-bold text-emerald-950">
+                        {validPhonesCount} de {candidates.length}
                       </span>
                     </div>
 
@@ -798,7 +887,7 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
                       className={`p-3 rounded-xl border ${
                         conflictCount > 0
                           ? 'bg-amber-50 border-amber-300 text-amber-900'
-                          : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          : 'bg-slate-50 border-slate-200 text-slate-800'
                       }`}
                     >
                       <span className="text-[10px] font-bold uppercase block">
@@ -825,10 +914,11 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
                           </th>
                           <th className="p-2.5">Data / Dia</th>
                           <th className="p-2.5">Horário / Turno</th>
-                          <th className="p-2.5">Disciplina</th>
+                          <th className="p-2.5">Professor</th>
+                          <th className="p-2.5">Celular / WhatsApp</th>
+                          <th className="p-2.5">Matéria / Disciplina</th>
                           <th className="p-2.5">Turma</th>
                           <th className="p-2.5">Segmento</th>
-                          <th className="p-2.5">Professor</th>
                           <th className="p-2.5">Laboratório</th>
                           <th className="p-2.5">Validação</th>
                         </tr>
@@ -870,11 +960,47 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
                               <td className="p-2.5">
                                 <input
                                   type="text"
+                                  value={cand.teacherName}
+                                  onChange={(e) =>
+                                    handleUpdateCandidateField(cand.tempId, 'teacherName', e.target.value)
+                                  }
+                                  className="w-full text-xs font-semibold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded"
+                                  placeholder="Nome do professor"
+                                />
+                              </td>
+                              <td className="p-2.5 whitespace-nowrap">
+                                <div className="flex items-center gap-1">
+                                  <Phone className="w-3 h-3 text-emerald-600 shrink-0" />
+                                  <input
+                                    type="text"
+                                    value={cand.whatsapp || ''}
+                                    placeholder="(11) 9XXXX-XXXX"
+                                    onChange={(e) =>
+                                      handleUpdateCandidateField(cand.tempId, 'whatsapp', e.target.value)
+                                    }
+                                    onBlur={(e) => {
+                                      const formatted = formatPhoneNumber(e.target.value);
+                                      if (formatted) {
+                                        handleUpdateCandidateField(cand.tempId, 'whatsapp', formatted);
+                                      }
+                                    }}
+                                    className={`w-32 text-xs font-mono px-1.5 py-0.5 rounded border transition-colors ${
+                                      !cand.whatsapp || cand.whatsapp === '(00) 00000-0000'
+                                        ? 'border-amber-300 bg-amber-50/60 text-amber-900 placeholder:text-amber-400'
+                                        : 'border-slate-200 bg-white text-slate-800 focus:border-blue-500'
+                                    } focus:outline-none`}
+                                  />
+                                </div>
+                              </td>
+                              <td className="p-2.5">
+                                <input
+                                  type="text"
                                   value={cand.subject}
                                   onChange={(e) =>
                                     handleUpdateCandidateField(cand.tempId, 'subject', e.target.value)
                                   }
-                                  className="w-full text-xs font-semibold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded"
+                                  className="w-full text-xs font-semibold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded"
+                                  placeholder="Matéria / Disciplina"
                                 />
                               </td>
                               <td className="p-2.5 whitespace-nowrap">
@@ -900,16 +1026,6 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
                                   <option value="ead">EAD</option>
                                   <option value="outros">Outros</option>
                                 </select>
-                              </td>
-                              <td className="p-2.5">
-                                <input
-                                  type="text"
-                                  value={cand.teacherName}
-                                  onChange={(e) =>
-                                    handleUpdateCandidateField(cand.tempId, 'teacherName', e.target.value)
-                                  }
-                                  className="w-full text-xs text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded"
-                                />
                               </td>
                               <td className="p-2.5 whitespace-nowrap text-slate-700 font-medium">
                                 {cand.labName}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/authContext';
-import { Booking, Lab, LAB_LIST } from './types';
+import { Booking, Lab, LAB_LIST, ShiftType } from './types';
 import { subscribeToBookings, deduplicateBookings } from './lib/bookingService';
 import { subscribeToLabs } from './lib/labService';
 import { Navbar, ActiveTab } from './components/Navbar';
@@ -35,6 +35,7 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('calendar');
   const [preselectedLabId, setPreselectedLabId] = useState<string>('lab-1');
   const [preselectedDate, setPreselectedDate] = useState<string>('');
+  const [preselectedShift, setPreselectedShift] = useState<ShiftType | undefined>();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
   const [latestNewBookingAlert, setLatestNewBookingAlert] = useState<Booking | null>(null);
@@ -122,27 +123,27 @@ function AppContent() {
       <OfflineIndicator />
 
       {/* Hero / Quick Context Header */}
-      <section className="bg-white border-b border-slate-200 py-6 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <section className="bg-white border-b border-slate-200 py-3.5 sm:py-6 px-3 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4">
           <div>
             {isAdmin && (
-              <div className="flex items-center gap-2 mb-2">
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+              <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
+                <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
                   <Shield className="w-3 h-3 text-amber-600" />
                   Modo Administrador Ativo
                 </span>
               </div>
             )}
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">
               Gestão de Laboratórios de Informática
             </h1>
-            <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-3xl">
+            <p className="text-xs sm:text-sm text-slate-600 mt-0.5 sm:mt-1 max-w-3xl line-clamp-2 sm:line-clamp-none">
               Agendamento de laboratórios fixos e carrinhos móveis com indicação de sala e envio instantâneo de confirmação pelo WhatsApp do professor.
             </p>
           </div>
 
           {/* Quick Action CTA */}
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             {activeTab !== 'booking' && (
               <button
                 id="hero-new-booking-btn"
@@ -150,7 +151,7 @@ function AppContent() {
                   setActiveTab('booking');
                   setPreselectedLabId('lab-1');
                 }}
-                className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 sm:flex-initial px-3.5 py-2 sm:px-4 sm:py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer min-h-[40px]"
               >
                 <Calendar className="w-4 h-4" />
                 <span>+ Fazer Agendamento</span>
@@ -161,18 +162,19 @@ function AppContent() {
               <button
                 id="hero-admin-panel-btn"
                 onClick={() => setActiveTab('admin')}
-                className="w-full sm:w-auto px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 sm:flex-initial px-3.5 py-2 sm:px-4 sm:py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer min-h-[40px]"
               >
                 <Shield className="w-3.5 h-3.5 text-amber-400" />
-                <span>{user?.role === 'technician' ? 'Painel do Técnico' : 'Painel Administrativo'}</span>
+                <span className="hidden sm:inline">{user?.role === 'technician' ? 'Painel do Técnico' : 'Painel Administrativo'}</span>
+                <span className="sm:hidden">Painel</span>
               </button>
             )}
           </div>
         </div>
       </section>
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Main Container com espaçamento otimizado para telas pequenas e barra de navegação inferior */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-6 lg:px-8 py-3.5 sm:py-8 pb-24 md:pb-8">
         {activeTab === 'labs' && (
           <LabGrid
             bookings={bookings}
@@ -188,13 +190,14 @@ function AppContent() {
             labs={labs}
             preselectedLabId={preselectedLabId}
             preselectedDate={preselectedDate}
+            preselectedShift={preselectedShift}
             onBookingCreated={handleBookingCreated}
           />
         )}
 
         {activeTab === 'calendar' && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200">
+          <div className="space-y-3 sm:space-y-4">
+            <div className="hidden sm:flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200">
               <div>
                 <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
                   <CalendarDays className="w-5 h-5 text-blue-600" />
@@ -223,6 +226,7 @@ function AppContent() {
                   onClick={() => {
                     setActiveTab('booking');
                     setPreselectedLabId('lab-1');
+                    setPreselectedShift(undefined);
                   }}
                   className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
@@ -235,8 +239,9 @@ function AppContent() {
               bookings={bookings}
               labs={labs}
               onOpenBatchImport={isAdmin ? () => setIsBatchImportOpen(true) : undefined}
-              onRequestNewBooking={(date) => {
+              onRequestNewBooking={(date, shift) => {
                 setPreselectedDate(date);
+                setPreselectedShift(shift);
                 setActiveTab('booking');
               }}
             />

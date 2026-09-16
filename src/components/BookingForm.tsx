@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Booking, LAB_LIST, Lab, RecurrenceType, EducationLevel } from '../types';
+import { Booking, LAB_LIST, Lab, RecurrenceType, EducationLevel, ShiftType } from '../types';
 import { EducationBadge, EducationLevelSelector } from './EducationBadge';
 import { checkBookingConflict, createBooking, createRecurringBookings } from '../lib/bookingService';
 import {
@@ -48,6 +48,7 @@ interface BookingFormProps {
   labs?: Lab[];
   preselectedLabId?: string;
   preselectedDate?: string;
+  preselectedShift?: ShiftType;
   onBookingCreated?: (booking: Booking) => void;
 }
 
@@ -56,6 +57,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   labs = LAB_LIST,
   preselectedLabId,
   preselectedDate,
+  preselectedShift,
   onBookingCreated,
 }) => {
   const { teacherSession, loginTeacher, isAdmin } = useAuth();
@@ -122,6 +124,23 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       setRecurrenceEndDate(calculateEndDateFromCount(preselectedDate, recurrenceFrequency, recurrenceCount, skipWeekends));
     }
   }, [preselectedDate, recurrenceFrequency, recurrenceCount, skipWeekends]);
+
+  // Sincroniza quando um turno pré-selecionado é fornecido a partir do calendário
+  useEffect(() => {
+    if (preselectedShift === 'manha') {
+      setStartTime('07:30');
+      setEndTime('11:55');
+      setScheduleLabel('Período Manhã Completo');
+    } else if (preselectedShift === 'tarde') {
+      setStartTime('13:15');
+      setEndTime('17:40');
+      setScheduleLabel('Período Tarde Completo');
+    } else if (preselectedShift === 'noite') {
+      setStartTime('19:00');
+      setEndTime('22:15');
+      setScheduleLabel('Período Noite Completo');
+    }
+  }, [preselectedShift]);
 
   // Sincroniza quando um lab pré-selecionado é fornecido
   useEffect(() => {
@@ -592,7 +611,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6">
+      <form onSubmit={handleSubmit} className="p-4 sm:p-6 md:p-8 space-y-5 sm:space-y-6">
         {/* AVISO IMPORTANTE: REGRAS E PRAZOS DE ANTECEDÊNCIA */}
         <div
           id="booking-rule-notice-banner"
@@ -1362,9 +1381,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
       {/* MODAL DE CONFIRMAÇÃO DE RECORRÊNCIA */}
       {showRecurrenceModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-scale-in">
-            <div className="p-5 bg-indigo-600 text-white flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4 animate-fade-in">
+          <div className="bg-white w-full max-w-xl max-h-[90vh] flex flex-col rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-scale-in">
+            <div className="p-4 sm:p-5 bg-indigo-600 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
                 <Repeat className="w-5 h-5 text-white" />
                 <div>

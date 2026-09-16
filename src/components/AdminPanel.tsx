@@ -33,6 +33,7 @@ import {
   X,
   Layers,
   ChevronRight,
+  FileDown,
 } from 'lucide-react';
 import { WhatsAppModal } from './WhatsAppModal';
 import { BatchImportModal } from './BatchImportModal';
@@ -45,6 +46,7 @@ import { EducationBadge } from './EducationBadge';
 import { useAuth } from '../lib/authContext';
 import { Lab } from '../types';
 import { playBookingConfirmedSound } from '../lib/soundUtils';
+import { downloadTeacherTemplateFile } from '../lib/batchScheduleParser';
 
 interface AdminPanelProps {
   bookings: Booking[];
@@ -237,7 +239,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-center">
+        <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+          <button
+            id="admin-download-template-btn"
+            type="button"
+            onClick={() => downloadTeacherTemplateFile('xlsx')}
+            title="Baixar modelo de planilha do Excel (Nome do Professor, Matéria e Celular)"
+            className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <FileDown className="w-3.5 h-3.5 text-blue-600" />
+            <span>Modelo Planilha</span>
+          </button>
+
           <button
             id="admin-top-batch-import-btn"
             type="button"
@@ -532,7 +545,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
         {isMenuDropdownOpen && (
           <div
             id="admin-suspended-menu-window"
-            className="absolute top-full left-0 right-0 lg:right-auto lg:w-[680px] mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 sm:p-5 z-40 animate-fade-in space-y-4"
+            className="absolute top-full left-0 right-0 lg:right-auto lg:w-[680px] mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 sm:p-5 z-40 animate-fade-in space-y-4 max-h-[85vh] overflow-y-auto"
           >
             {/* Header do Menu de Módulos */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">

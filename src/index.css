@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+@layer utilities {
+  /* Suporte a barras inferiores de gestos e entalhes em smartphones (iOS e Android) */
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.5rem);
+  }
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top, 0px), 0.5rem);
+  }
+}
+
+/* Evita auto-zoom indesejado no iOS Safari ao tocar em inputs */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="tel"],
+  input[type="email"],
+  input[type="date"],
+  input[type="time"],
+  input[type="number"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Scroll suave com momentum para tabelas e calendários horizontais */
+.smooth-horizontal-scroll {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
