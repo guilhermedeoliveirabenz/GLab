@@ -6,6 +6,7 @@ import {
   updateLabSoftwares,
   clearAllLabsSoftwares,
   updateLabNotes,
+  updateLabVisibilityForBooking,
   POPULAR_SOFTWARES_LIST,
 } from '../lib/labService';
 import {
@@ -37,6 +38,8 @@ import {
   FileText,
   Edit3,
   Building2,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { LabModal } from './LabModal';
 
@@ -62,6 +65,7 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
   const [isClearingAllSoftwares, setIsClearingAllSoftwares] = useState(false);
   const [isLabModalOpen, setIsLabModalOpen] = useState(false);
   const [labModalTarget, setLabModalTarget] = useState<Lab | null>(null);
+  const [isMobileLabListOpen, setIsMobileLabListOpen] = useState(false);
 
   // Local draft states per lab
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>(() => {
@@ -103,6 +107,14 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
     const initial: Record<string, string[]> = {};
     labs.forEach((l) => {
       initial[l.id] = l.softwares ? [...l.softwares] : [];
+    });
+    return initial;
+  });
+
+  const [visibleDraft, setVisibleDraft] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    labs.forEach((l) => {
+      initial[l.id] = l.visibleForBooking !== false;
     });
     return initial;
   });
@@ -154,6 +166,14 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
         if (!updated[l.id]) {
           updated[l.id] = l.softwares ? [...l.softwares] : [];
         }
+      });
+      return updated;
+    });
+
+    setVisibleDraft(() => {
+      const updated: Record<string, boolean> = {};
+      labs.forEach((l) => {
+        updated[l.id] = l.visibleForBooking !== false;
       });
       return updated;
     });
@@ -302,6 +322,24 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
     }));
   };
 
+  // Quick toggle for booking visibility
+  const handleQuickToggleVisibility = async (labId: string, newVisibility: boolean) => {
+    setVisibleDraft((prev) => ({ ...prev, [labId]: newVisibility }));
+    const targetLab = labs.find((l) => l.id === labId);
+    const labName = targetLab ? targetLab.name : 'Laboratório';
+    try {
+      await updateLabVisibilityForBooking(labId, newVisibility);
+      setSuccessMsg(
+        newVisibility
+          ? `O ${labName} agora está VISÍVEL para agendamentos no formulário de professores!`
+          : `O ${labName} agora está OCULTO para agendamentos (visível apenas para administradores).`,
+      );
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (e) {
+      console.error('Erro ao atualizar visibilidade do laboratório:', e);
+    }
+  };
+
   // Save All for Selected Lab
   const handleSaveLabSettings = async (labId: string) => {
     setSavingLabId(labId);
@@ -311,6 +349,7 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
       const broad = broadcastDraft[labId] || '';
       const softs = softwaresDraft[labId] || [];
       const notes = notesDraft[labId] !== undefined ? notesDraft[labId] : (selectedLab.notes || '');
+      const isVisible = visibleDraft[labId] !== undefined ? visibleDraft[labId] : (selectedLab.visibleForBooking !== false);
 
       await Promise.all([
         updateLabMaintenanceStatus(
@@ -328,9 +367,10 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
         updateLabBroadcastMessage(labId, broad),
         updateLabSoftwares(labId, softs),
         updateLabNotes(labId, notes),
+        updateLabVisibilityForBooking(labId, isVisible),
       ]);
 
-      setSuccessMsg(`Configurações de agendamento e manutenção do ${selectedLab.name} salvas com sucesso!`);
+      setSuccessMsg(`Configurações de agendamento, visibilidade e manutenção do ${selectedLab.name} salvas com sucesso!`);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (e) {
       console.error('Erro ao salvar laboratório:', e);
@@ -399,9 +439,59 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
         </div>
       )}
 
+      {/* Seletor Rápido de Laboratórios para Celular (Telas Pequenas) */}
+      <div className="lg:hidden bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
+        <div className="flex items-center justify-between">
+          <label htmlFor="mobile-lab-quick-select" className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+            <Laptop className="w-3.5 h-3.5 text-blue-600" />
+            <span>Selecionar Laboratório:</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setLabModalTarget(null);
+                setIsLabModalOpen(true);
+              }}
+              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+            >
+              <Plus className="w-3 h-3" />
+              <span>+ Novo</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsMobileLabListOpen(!isMobileLabListOpen)}
+              className="text-xs text-blue-700 font-bold px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 cursor-pointer"
+            >
+              {isMobileLabListOpen ? 'Ocultar Lista' : `Ver Todos (${labs.length})`}
+            </button>
+          </div>
+        </div>
+
+        <select
+          id="mobile-lab-quick-select"
+          value={selectedLabId}
+          onChange={(e) => {
+            setSelectedLabId(e.target.value);
+            setCustomSoftwareInput('');
+          }}
+          className="w-full text-xs font-bold py-2.5 px-3 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 text-slate-900 min-h-[44px] cursor-pointer"
+        >
+          {labs.map((lab) => {
+            const isMaint = maintenanceDraft[lab.id]?.isUnderMaintenance;
+            const isHidden = (visibleDraft[lab.id] !== undefined ? visibleDraft[lab.id] : (lab.visibleForBooking !== false)) === false;
+            return (
+              <option key={lab.id} value={lab.id}>
+                {lab.name} ({lab.capacity} máqs){isMaint ? ' • [Manutenção]' : ''}{isHidden ? ' • [Oculto]' : ''}
+              </option>
+            );
+          })}
+        </select>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Lab Selector Sidebar */}
-        <div className="lg:col-span-4 space-y-2">
+        <div className={`${isMobileLabListOpen ? 'block' : 'hidden'} lg:block lg:col-span-4 space-y-2`}>
           <div className="flex items-center justify-between px-1">
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
               Laboratórios ({labs.length})
@@ -476,6 +566,15 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                             Obs
                           </span>
                         )}
+                        {(visibleDraft[lab.id] !== undefined ? visibleDraft[lab.id] : (lab.visibleForBooking !== false)) === false && (
+                          <span
+                            className="text-[9px] font-bold bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded-sm flex items-center gap-0.5"
+                            title="Oculto para agendamento dos professores"
+                          >
+                            <EyeOff className="w-2.5 h-2.5 text-slate-500" />
+                            <span>Oculto</span>
+                          </span>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-500 truncate">
                         {lab.capacity} máq. • {lab.isMobile ? 'Móvel' : 'Fixo'}
@@ -502,9 +601,9 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-6">
             {/* Top Lab Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
-              <div className="flex items-center gap-3">
+              <div className="flex items-start sm:items-center gap-3">
                 <div
-                  className={`w-12 h-12 rounded-xl flex items-center justify-center text-white ${
+                  className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center text-white shrink-0 ${
                     currentMaintenance.isUnderMaintenance
                       ? 'bg-rose-600'
                       : selectedLab.isMobile
@@ -513,15 +612,15 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                   }`}
                 >
                   {currentMaintenance.isUnderMaintenance ? (
-                    <Wrench className="w-6 h-6" />
+                    <Wrench className="w-5 h-5 sm:w-6 sm:h-6" />
                   ) : selectedLab.isMobile ? (
-                    <Truck className="w-6 h-6" />
+                    <Truck className="w-5 h-5 sm:w-6 sm:h-6" />
                   ) : (
-                    <Laptop className="w-6 h-6" />
+                    <Laptop className="w-5 h-5 sm:w-6 sm:h-6" />
                   )}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                     <h3 className="text-base font-bold text-slate-900">{selectedLab.name}</h3>
                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
                       {selectedLab.capacity} computadores
@@ -543,6 +642,25 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                         DISPONÍVEL
                       </span>
                     )}
+                    {(visibleDraft[selectedLab.id] !== undefined
+                      ? visibleDraft[selectedLab.id]
+                      : selectedLab.visibleForBooking !== false) ? (
+                      <span
+                        className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center gap-1"
+                        title="Este laboratório está visível no formulário de agendamento"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Visível para Professores</span>
+                      </span>
+                    ) : (
+                      <span
+                        className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300 flex items-center gap-1"
+                        title="Este laboratório está oculto para os professores no agendamento"
+                      >
+                        <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Oculto do Formulário</span>
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-500">
                     {selectedLab.description}
@@ -562,7 +680,47 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 self-start sm:self-center">
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleQuickToggleVisibility(
+                      selectedLab.id,
+                      !(visibleDraft[selectedLab.id] !== undefined
+                        ? visibleDraft[selectedLab.id]
+                        : selectedLab.visibleForBooking !== false),
+                    )
+                  }
+                  className={`px-3 py-2 text-xs font-bold rounded-xl border transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                    (visibleDraft[selectedLab.id] !== undefined
+                      ? visibleDraft[selectedLab.id]
+                      : selectedLab.visibleForBooking !== false)
+                      ? 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                  }`}
+                  title={
+                    (visibleDraft[selectedLab.id] !== undefined
+                      ? visibleDraft[selectedLab.id]
+                      : selectedLab.visibleForBooking !== false)
+                      ? 'Ocultar este laboratório do formulário de agendamento dos professores'
+                      : 'Tornar este laboratório visível para agendamento pelos professores'
+                  }
+                >
+                  {(visibleDraft[selectedLab.id] !== undefined
+                    ? visibleDraft[selectedLab.id]
+                    : selectedLab.visibleForBooking !== false) ? (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Ocultar Lab</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Tornar Visível</span>
+                    </>
+                  )}
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -585,6 +743,117 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                   <Save className="w-4 h-4" />
                   <span>{savingLabId === selectedLab.id ? 'Salvando...' : 'Salvar Alterações'}</span>
                 </button>
+              </div>
+            </div>
+
+            {/* SEÇÃO: VISIBILIDADE PARA AGENDAMENTO */}
+            <div
+              className={`p-5 rounded-2xl border transition-all ${
+                (visibleDraft[selectedLab.id] !== undefined
+                  ? visibleDraft[selectedLab.id]
+                  : selectedLab.visibleForBooking !== false)
+                  ? 'border-emerald-200 bg-emerald-50/40'
+                  : 'border-slate-300 bg-slate-50/80'
+              } space-y-3.5`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/80">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-xs text-white ${
+                      (visibleDraft[selectedLab.id] !== undefined
+                        ? visibleDraft[selectedLab.id]
+                        : selectedLab.visibleForBooking !== false)
+                        ? 'bg-emerald-600'
+                        : 'bg-slate-500'
+                    }`}
+                  >
+                    {(visibleDraft[selectedLab.id] !== undefined
+                      ? visibleDraft[selectedLab.id]
+                      : selectedLab.visibleForBooking !== false) ? (
+                      <Eye className="w-5 h-5" />
+                    ) : (
+                      <EyeOff className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <span>Visibilidade para Agendamento</span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          (visibleDraft[selectedLab.id] !== undefined
+                            ? visibleDraft[selectedLab.id]
+                            : selectedLab.visibleForBooking !== false)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-200 text-slate-700 border border-slate-300'
+                        }`}
+                      >
+                        {(visibleDraft[selectedLab.id] !== undefined
+                          ? visibleDraft[selectedLab.id]
+                          : selectedLab.visibleForBooking !== false)
+                          ? 'Visível para Professores'
+                          : 'Oculto para Professores'}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Defina se este laboratório estará disponível para escolha no formulário de agendamento.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 self-start sm:self-center">
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={
+                        visibleDraft[selectedLab.id] !== undefined
+                          ? visibleDraft[selectedLab.id]
+                          : selectedLab.visibleForBooking !== false
+                      }
+                      onChange={(e) =>
+                        handleQuickToggleVisibility(selectedLab.id, e.target.checked)
+                      }
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                  <span className="text-xs font-bold text-slate-800 min-w-[50px]">
+                    {(visibleDraft[selectedLab.id] !== undefined
+                      ? visibleDraft[selectedLab.id]
+                      : selectedLab.visibleForBooking !== false)
+                      ? 'Visível'
+                      : 'Oculto'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-xs text-slate-600 bg-white/80 p-3 rounded-xl border border-slate-200/70">
+                {(visibleDraft[selectedLab.id] !== undefined
+                  ? visibleDraft[selectedLab.id]
+                  : selectedLab.visibleForBooking !== false) ? (
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-emerald-950">
+                        Laboratório ativo e disponível para agendamentos
+                      </p>
+                      <p className="text-slate-500 mt-0.5 text-[11px] leading-relaxed">
+                        Os professores podem selecionar o <strong>{selectedLab.name}</strong> diretamente no formulário de solicitação de agendamento de aulas.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2">
+                    <Info className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        Laboratório oculto do formulário de agendamento
+                      </p>
+                      <p className="text-slate-500 mt-0.5 text-[11px] leading-relaxed">
+                        O <strong>{selectedLab.name}</strong> não é exibido como opção no formulário de agendamento para os professores. Apenas administradores podem gerenciá-lo ou visualizá-lo.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

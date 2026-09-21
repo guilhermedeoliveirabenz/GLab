@@ -12,6 +12,7 @@ export interface Lab {
   location?: string; // Localização física (ex: Bloco C - 2º andar)
   customAdded?: boolean; // Se foi adicionado pelo gestor
   active?: boolean; // Se o laboratório está ativo no sistema
+  visibleForBooking?: boolean; // Se o laboratório está visível para agendamento (padrão true)
   updatedAt?: number;
   softwares?: string[];
   isUnderMaintenance?: boolean; // Se o laboratório está fechado para manutenção
@@ -112,6 +113,9 @@ export interface Booking {
   confirmedAt?: number;
   whatsappSent: boolean;
   whatsappSentAt?: number;
+  emailSent?: boolean;
+  emailSentAt?: number;
+  emailRecipients?: string[];
   adminNotes?: string;
   recurrenceGroupId?: string; // ID do grupo se for agendamento recorrente
   recurrenceFrequency?: RecurrenceType;
@@ -271,3 +275,41 @@ export const TIME_SLOTS: TimeSlotOption[] = [
   { id: 'n1', label: '1º Horário Noite (19:00 - 20:30)', shift: 'noite', startTime: '19:00', endTime: '20:30' },
   { id: 'n2', label: '2º Horário Noite (20:45 - 22:15)', shift: 'noite', startTime: '20:45', endTime: '22:15' },
 ];
+
+export interface SmtpConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  fromName: string;
+  fromEmail: string;
+  updatedAt?: number;
+}
+
+export interface EmailSettings {
+  enabled: boolean;
+  adminNotificationEmail: string; // E-mail geral do administrador para notificações
+  recipientEmails?: string[]; // Lista de e-mails cadastrados para receber as notificações de novos agendamentos
+  notifyAllAdmins: boolean;
+  notifyAssignedTechnicians: boolean;
+  smtp?: SmtpConfig;
+  updatedAt?: number;
+}
+
+export interface EmailLog {
+  id: string;
+  bookingId?: string;
+  subject: string;
+  recipients: string[];
+  sentAt: number;
+  status: 'sent' | 'failed';
+  type: 'booking_created' | 'test' | 'custom';
+  protocol?: 'smtp' | 'firebase' | 'mailto';
+  labName?: string;
+  teacherName?: string;
+  details?: string;
+  smtpResponse?: string;
+}
+

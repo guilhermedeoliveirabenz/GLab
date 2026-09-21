@@ -43,6 +43,16 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // Regras para disparo de e-mails (Firebase Trigger Email extension)
+    match /mail/{mailId} {
+      allow read, write: if true;
+    }
+
+    // Regras para histórico de logs de e-mails
+    match /email_logs/{logId} {
+      allow read, write: if true;
+    }
+
     // Regras para testes de conectividade
     match /test/{docId} {
       allow read, write: if true;

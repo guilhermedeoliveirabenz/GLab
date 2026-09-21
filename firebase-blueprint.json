@@ -71,6 +71,33 @@
         "subtitle": { "type": "string" },
         "updatedAt": { "type": "number" }
       }
+    },
+    "EmailNotification": {
+      "title": "EmailNotification",
+      "description": "Disparo de e-mails para Firebase Trigger Email",
+      "type": "object",
+      "properties": {
+        "to": { "type": "array" },
+        "message": { "type": "object" },
+        "createdAt": { "type": "number" },
+        "bookingId": { "type": "string" }
+      },
+      "required": ["to", "message"]
+    },
+    "EmailLog": {
+      "title": "EmailLog",
+      "description": "Histórico e logs de e-mails de agendamento disparados para técnicos e administradores",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookingId": { "type": "string" },
+        "subject": { "type": "string" },
+        "recipients": { "type": "array" },
+        "sentAt": { "type": "number" },
+        "status": { "type": "string" },
+        "type": { "type": "string" }
+      },
+      "required": ["subject", "recipients", "sentAt", "status"]
     }
   },
   "firestore": {
@@ -89,6 +116,14 @@
     "/settings/{settingId}": {
       "schema": "Settings",
       "description": "Configurações globais do sistema"
+    },
+    "/mail/{mailId}": {
+      "schema": "EmailNotification",
+      "description": "Disparos de e-mail compatíveis com Firebase Trigger Email extension"
+    },
+    "/email_logs/{logId}": {
+      "schema": "EmailLog",
+      "description": "Histórico de logs de notificações enviadas"
     }
   }
 }

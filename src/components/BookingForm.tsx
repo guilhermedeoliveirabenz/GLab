@@ -40,8 +40,12 @@ import {
   Shield,
   Check,
   X,
+  EyeOff,
+  Mail,
+  Send,
 } from 'lucide-react';
 import { playBookingSuccessSound } from '../lib/soundUtils';
+import { sendBookingNotificationEmail, generateMailtoUrl } from '../lib/emailService';
 
 interface BookingFormProps {
   existingBookings: Booking[];
@@ -70,20 +74,42 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   // Se houver data pré-selecionada, utilize-a; caso contrário, use minDate (1ª data permitida)
   const defaultDate = preselectedDate || minDate;
 
+  // Filtra laboratórios visíveis para agendamento (professores veem estritamente apenas labs com visibleForBooking !== false)
+  const availableLabs = labs.filter((l) => {
+    if (isAdmin) return true;
+    return l.visibleForBooking !== false;
+  });
+
   const [teacherName, setTeacherName] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [educationLevel, setEducationLevel] = useState<EducationLevel>('basico');
   const [classGroup, setClassGroup] = useState('');
   const [subject, setSubject] = useState('');
-  const [labId, setLabId] = useState(preselectedLabId || labs[0]?.id || 'lab-1');
-  const selectedLab = labs.find((l) => l.id === labId) || labs[0] || LAB_LIST[0];
-  const [requestedMachines, setRequestedMachines] = useState<number>(selectedLab.capacity);
+  const [labId, setLabId] = useState<string>(() => {
+    if (preselectedLabId && availableLabs.some((l) => l.id === preselectedLabId)) {
+      return preselectedLabId;
+    }
+    return availableLabs[0]?.id || (isAdmin ? (labs[0]?.id || 'lab-1') : '');
+  });
+  const selectedLab =
+    availableLabs.find((l) => l.id === labId) ||
+    availableLabs[0] ||
+    (isAdmin ? (labs.find((l) => l.id === labId) || labs[0]) : LAB_LIST[0]);
+  const [requestedMachines, setRequestedMachines] = useState<number>(selectedLab ? selectedLab.capacity : 30);
   const [roomNumber, setRoomNumber] = useState('');
   const [date, setDate] = useState(defaultDate);
   const [startTime, setStartTime] = useState('07:30');
   const [endTime, setEndTime] = useState('09:10');
   const [scheduleLabel, setScheduleLabel] = useState('');
   const [notes, setNotes] = useState('');
+
+  // Sincroniza se laboratório selecionado não estiver mais entre os disponíveis
+  useEffect(() => {
+    if (!isAdmin && availableLabs.length > 0 && !availableLabs.some((l) => l.id === labId)) {
+      setLabId(availableLabs[0].id);
+      setRequestedMachines(availableLabs[0].capacity);
+    }
+  }, [availableLabs, isAdmin, labId]);
 
   // Recurring Booking State
   const [isRecurring, setIsRecurring] = useState(false);
@@ -101,6 +127,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [successBooking, setSuccessBooking] = useState<Booking | null>(null);
   const [recurringSuccessCount, setRecurringSuccessCount] = useState<number | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
+  const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
+  const [emailSentStatus, setEmailSentStatus] = useState<boolean>(false);
+  const [emailProtocol, setEmailProtocol] = useState<string>('smtp');
 
   // Validação em tempo real da regra de antecedência de 3 a 20 dias úteis
   const dateValidation = validateBookingLeadTime(date);
@@ -145,13 +174,19 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   // Sincroniza quando um lab pré-selecionado é fornecido
   useEffect(() => {
     if (preselectedLabId) {
-      setLabId(preselectedLabId);
-      const lab = labs.find((l) => l.id === preselectedLabId);
-      if (lab) {
-        setRequestedMachines(lab.capacity);
+      const isValid = availableLabs.some((l) => l.id === preselectedLabId);
+      if (isValid) {
+        setLabId(preselectedLabId);
+        const lab = availableLabs.find((l) => l.id === preselectedLabId);
+        if (lab) {
+          setRequestedMachines(lab.capacity);
+        }
+      } else if (availableLabs.length > 0 && !availableLabs.some((l) => l.id === labId)) {
+        setLabId(availableLabs[0].id);
+        setRequestedMachines(availableLabs[0].capacity);
       }
     }
-  }, [preselectedLabId, labs]);
+  }, [preselectedLabId, availableLabs, labId]);
 
   // Adjust machines when selected lab changes
   const handleLabChange = (newLabId: string) => {
@@ -354,6 +389,17 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         setSuccessBooking(createdList[0]);
         setRecurringSuccessCount(createdList.length);
         onBookingCreated?.(createdList[0]);
+
+        // Dispara notificação por e-mail para os técnicos e administradores responsáveis
+        sendBookingNotificationEmail(createdList[0])
+          .then((emailRes) => {
+            setEmailRecipients(emailRes.recipients || []);
+            setEmailSentStatus(emailRes.success);
+            if (emailRes.protocol) {
+              setEmailProtocol(emailRes.protocol);
+            }
+          })
+          .catch((err) => console.warn('Falha ao enviar e-mail de notificação:', err));
       }
     } catch (e) {
       console.error('Erro ao agendar com recorrência:', e);
@@ -482,6 +528,18 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       setRecurringSuccessCount(null);
       onBookingCreated?.(created);
       setNotes('');
+
+      // Dispara notificação por e-mail para os técnicos e administradores responsáveis
+      try {
+        const emailRes = await sendBookingNotificationEmail(created);
+        setEmailRecipients(emailRes.recipients || []);
+        setEmailSentStatus(emailRes.success);
+        if (emailRes.protocol) {
+          setEmailProtocol(emailRes.protocol);
+        }
+      } catch (emailErr) {
+        console.warn('Falha ao enviar e-mail de notificação:', emailErr);
+      }
     } catch (err) {
       console.error('Erro ao agendar:', err);
       setConflictError('Ocorreu um erro ao gravar o agendamento. Tente novamente.');
@@ -494,6 +552,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     setSuccessBooking(null);
     setRecurringSuccessCount(null);
     setConflictError(null);
+    setEmailRecipients([]);
+    setEmailSentStatus(false);
     setClassGroup('');
     setSubject('');
     setRoomNumber('');
@@ -580,6 +640,73 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             <span className="inline-flex items-center gap-1 font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full text-xs border border-amber-200">
               Aguardando Confirmação
             </span>
+          </div>
+        </div>
+
+        {/* Notificação por E-mail para Técnicos e Administradores */}
+        <div
+          id="booking-email-notification-banner"
+          className="bg-blue-50/90 border border-blue-200 rounded-xl p-4 text-left text-sm mb-6"
+        >
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-blue-600 text-white rounded-lg shrink-0 mt-0.5 shadow-2xs">
+              <Mail className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="font-bold text-blue-950 text-sm">
+                  Notificação por E-mail aos Responsáveis
+                </h4>
+                <span className="bg-blue-200/90 text-blue-900 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  {emailSentStatus ? 'Disparado' : 'Automático'}
+                </span>
+                {emailProtocol === 'smtp' && (
+                  <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wide flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                    SMTP Relay
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-blue-800 mt-1 leading-relaxed">
+                Os dados completos desta reserva foram encaminhados por e-mail para a equipe de técnicos e administradores:
+              </p>
+
+              {emailRecipients.length > 0 ? (
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {emailRecipients.map((rec) => (
+                    <span
+                      key={rec}
+                      className="inline-flex items-center gap-1 bg-white border border-blue-300/80 text-blue-900 text-xs font-semibold px-2.5 py-1 rounded-lg shadow-2xs"
+                    >
+                      <Mail className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span className="truncate max-w-[240px] sm:max-w-none">{rec}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Nenhum e-mail de técnico ou administrador cadastrado para este laboratório. Os e-mails podem ser configurados no Painel do GestLab.</span>
+                </div>
+              )}
+
+              {/* Botão de envio rápido ou abertura no cliente de e-mail local */}
+              <div className="mt-3 pt-2.5 border-t border-blue-200/70 flex flex-wrap items-center gap-2">
+                <a
+                  id="btn-open-booking-mailto"
+                  href={generateMailtoUrl(
+                    successBooking,
+                    emailRecipients.length > 0 ? emailRecipients : ['gestlab@escola.edu.br'],
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer shadow-2xs"
+                >
+                  <Send className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Abrir no seu E-mail (Gmail / Outlook)</span>
+                </a>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -687,66 +814,86 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           <label className="block text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
             <Monitor className="w-4 h-4 text-blue-600" />
             <span>Selecione o Laboratório</span>
-            <span className="text-xs font-normal text-slate-600">({labs.length} opções disponíveis)</span>
+            <span className="text-xs font-normal text-slate-600">
+              ({availableLabs.length} {availableLabs.length === 1 ? 'opção disponível' : 'opções disponíveis'})
+            </span>
           </label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
-            {labs.map((lab) => {
-              const isSelected = lab.id === labId;
-              const labMaintStatus = getLabMaintenanceStatus(lab, date, startTime, endTime);
-              const isMaintActive = labMaintStatus.isUnderMaintenance;
-              const isMaintFuture = !isMaintActive && labMaintStatus.isScheduledFuture;
 
-              return (
-                <button
-                  key={lab.id}
-                  type="button"
-                  id={`select-lab-${lab.id}`}
-                  onClick={() => handleLabChange(lab.id)}
-                  className={`p-3 rounded-xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
-                    isSelected
-                      ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-600/20 shadow-xs'
-                      : isMaintActive
-                        ? 'border-rose-300 bg-rose-50/50 hover:bg-rose-50/80'
+          {availableLabs.length === 0 ? (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs">
+              Nenhum laboratório está visível para agendamento no momento. Por favor, contate a administração escolar.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+              {availableLabs.map((lab) => {
+                const isSelected = lab.id === labId;
+                const labMaintStatus = getLabMaintenanceStatus(lab, date, startTime, endTime);
+                const isMaintActive = labMaintStatus.isUnderMaintenance;
+                const isMaintFuture = !isMaintActive && labMaintStatus.isScheduledFuture;
+                const isHiddenFromTeachers = lab.visibleForBooking === false;
+
+                return (
+                  <button
+                    key={lab.id}
+                    type="button"
+                    id={`select-lab-${lab.id}`}
+                    onClick={() => handleLabChange(lab.id)}
+                    className={`p-3 rounded-xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
+                      isSelected
+                        ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-600/20 shadow-xs'
+                        : isMaintActive
+                          ? 'border-rose-300 bg-rose-50/50 hover:bg-rose-50/80'
+                          : isMaintFuture
+                            ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50/70'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                    title={
+                      isMaintActive
+                        ? `Fechado para manutenção (${labMaintStatus.formattedPeriod})`
                         : isMaintFuture
-                          ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50/70'
-                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
-                  title={
-                    isMaintActive
-                      ? `Fechado para manutenção (${labMaintStatus.formattedPeriod})`
-                      : isMaintFuture
-                        ? `Manutenção programada para ${labMaintStatus.formattedPeriod}`
-                        : undefined
-                  }
-                >
-                  <div className="flex items-center justify-between gap-1 mb-1">
-                    <span className="font-bold text-xs text-slate-900 truncate">{lab.name}</span>
-                    {isMaintActive ? (
-                      <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-rose-600 text-white shrink-0">
-                        Manutenção
-                      </span>
-                    ) : isMaintFuture ? (
-                      <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-500 text-white shrink-0">
-                        Agendada
-                      </span>
-                    ) : lab.isMobile ? (
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 shrink-0">
-                        Móvel
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-medium text-slate-600 shrink-0">Fixo</span>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
-                    <span>🖥️ {lab.capacity} máq.</span>
-                    {lab.broadcastMessage && (
-                      <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" title="Possui aviso especial" />
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                          ? `Manutenção programada para ${labMaintStatus.formattedPeriod}`
+                          : isHiddenFromTeachers
+                            ? 'Este laboratório está oculto para agendamento pelos professores'
+                            : undefined
+                    }
+                  >
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className="font-bold text-xs text-slate-900 truncate">{lab.name}</span>
+                      {isMaintActive ? (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-rose-600 text-white shrink-0">
+                          Manutenção
+                        </span>
+                      ) : isMaintFuture ? (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-500 text-white shrink-0">
+                          Agendada
+                        </span>
+                      ) : isHiddenFromTeachers ? (
+                        <span
+                          className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-slate-200 text-slate-700 shrink-0 flex items-center gap-0.5"
+                          title="Oculto para professores"
+                        >
+                          <EyeOff className="w-2.5 h-2.5 text-slate-500" />
+                          <span>Oculto</span>
+                        </span>
+                      ) : lab.isMobile ? (
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 shrink-0">
+                          Móvel
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-medium text-slate-600 shrink-0">Fixo</span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
+                      <span>🖥️ {lab.capacity} máq.</span>
+                      {lab.broadcastMessage && (
+                        <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" title="Possui aviso especial" />
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* ALERTA DE MANUTENÇÃO (Se o lab selecionado estiver fechado no horário escolhido) */}
           {isLabUnderMaintenance && (

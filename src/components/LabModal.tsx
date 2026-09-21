@@ -14,6 +14,8 @@ import {
   Palette,
   Hash,
   Sparkles,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface LabModalProps {
@@ -40,6 +42,7 @@ export const LabModal: React.FC<LabModalProps> = ({
   const [notes, setNotes] = useState('');
   const [location, setLocation] = useState('');
   const [badgeColor, setBadgeColor] = useState(LAB_BADGE_COLORS[0].value);
+  const [visibleForBooking, setVisibleForBooking] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -53,6 +56,7 @@ export const LabModal: React.FC<LabModalProps> = ({
       setNotes(labToEdit.notes || '');
       setLocation(labToEdit.location || '');
       setBadgeColor(labToEdit.badgeColor || LAB_BADGE_COLORS[0].value);
+      setVisibleForBooking(labToEdit.visibleForBooking !== false);
     } else {
       setName('');
       setCapacity(35);
@@ -61,6 +65,7 @@ export const LabModal: React.FC<LabModalProps> = ({
       setNotes('');
       setLocation('');
       setBadgeColor(LAB_BADGE_COLORS[0].value);
+      setVisibleForBooking(true);
     }
     setErrorMsg(null);
     setIsDeleting(false);
@@ -97,6 +102,7 @@ export const LabModal: React.FC<LabModalProps> = ({
         location: location.trim(),
         badgeColor,
         softwares: labToEdit?.softwares || [],
+        visibleForBooking,
       });
 
       if (onSaved) {
@@ -286,6 +292,70 @@ export const LabModal: React.FC<LabModalProps> = ({
               placeholder="Ex: Chave disponível com a coordenação. Possui projetor HDMI integrado e 6 tomadas extras na bancada lateral. Ar condicionado no controle 1."
               className="w-full px-3 py-2 bg-white border border-amber-300/80 rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-600 transition-all leading-relaxed"
             />
+          </div>
+
+          {/* Visibilidade para Agendamento */}
+          <div
+            className={`p-4 rounded-xl border transition-all ${
+              visibleForBooking
+                ? 'bg-emerald-50/70 border-emerald-300 shadow-2xs'
+                : 'bg-slate-50 border-slate-300'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div
+                  className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                    visibleForBooking
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  {visibleForBooking ? (
+                    <Eye className="w-5 h-5 text-emerald-600" />
+                  ) : (
+                    <EyeOff className="w-5 h-5 text-slate-500" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <label
+                      htmlFor="lab-visible-for-booking-checkbox"
+                      className="text-xs font-bold text-slate-900 cursor-pointer"
+                    >
+                      Visível para Agendamento
+                    </label>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        visibleForBooking
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : 'bg-slate-200 text-slate-700 border border-slate-300'
+                      }`}
+                    >
+                      {visibleForBooking
+                        ? 'Disponível no formulário'
+                        : 'Oculto para professores'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-1">
+                    {visibleForBooking
+                      ? 'Professores e usuários poderão visualizar este laboratório e selecioná-lo no formulário de agendamento.'
+                      : 'Este laboratório não aparecerá para os professores na lista de agendamentos (visível e gerenciável apenas por administradores).'}
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                <input
+                  id="lab-visible-for-booking-checkbox"
+                  type="checkbox"
+                  checked={visibleForBooking}
+                  onChange={(e) => setVisibleForBooking(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+            </div>
           </div>
 
           {/* Descrição e Localização */}

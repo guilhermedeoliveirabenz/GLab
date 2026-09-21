@@ -33,7 +33,7 @@ function AppContent() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [labs, setLabs] = useState<Lab[]>(LAB_LIST);
   const [activeTab, setActiveTab] = useState<ActiveTab>('calendar');
-  const [preselectedLabId, setPreselectedLabId] = useState<string>('lab-1');
+  const [preselectedLabId, setPreselectedLabId] = useState<string>('');
   const [preselectedDate, setPreselectedDate] = useState<string>('');
   const [preselectedShift, setPreselectedShift] = useState<ShiftType | undefined>();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -94,7 +94,19 @@ function AppContent() {
   const pendingCount = bookings.filter((b) => b.status === 'pending').length;
 
   const handleSelectLabToBook = (labId: string) => {
+    const targetLab = labs.find((l) => l.id === labId);
+    if (!isAdmin && targetLab && targetLab.visibleForBooking === false) {
+      return;
+    }
     setPreselectedLabId(labId);
+    setActiveTab('booking');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenBooking = () => {
+    const firstVisible = labs.find((l) => isAdmin || l.visibleForBooking !== false);
+    setPreselectedLabId(firstVisible?.id || '');
+    setPreselectedShift(undefined);
     setActiveTab('booking');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -147,10 +159,7 @@ function AppContent() {
             {activeTab !== 'booking' && (
               <button
                 id="hero-new-booking-btn"
-                onClick={() => {
-                  setActiveTab('booking');
-                  setPreselectedLabId('lab-1');
-                }}
+                onClick={handleOpenBooking}
                 className="flex-1 sm:flex-initial px-3.5 py-2 sm:px-4 sm:py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer min-h-[40px]"
               >
                 <Calendar className="w-4 h-4" />
@@ -223,11 +232,7 @@ function AppContent() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setActiveTab('booking');
-                    setPreselectedLabId('lab-1');
-                    setPreselectedShift(undefined);
-                  }}
+                  onClick={handleOpenBooking}
                   className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   <span>+ Fazer Agendamento</span>
@@ -242,7 +247,10 @@ function AppContent() {
               onRequestNewBooking={(date, shift) => {
                 setPreselectedDate(date);
                 setPreselectedShift(shift);
+                const firstVisible = labs.find((l) => isAdmin || l.visibleForBooking !== false);
+                setPreselectedLabId(firstVisible?.id || '');
                 setActiveTab('booking');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
             />
           </div>
@@ -251,10 +259,7 @@ function AppContent() {
         {activeTab === 'my_bookings' && (
           <TeacherMyBookings
             bookings={bookings}
-            onNewBookingClick={() => {
-              setActiveTab('booking');
-              setPreselectedLabId('lab-1');
-            }}
+            onNewBookingClick={handleOpenBooking}
           />
         )}
 

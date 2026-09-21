@@ -156,6 +156,7 @@ export function subscribeToLabs(callback: (labs: Lab[]) => void): () => void {
           broadcastMessage: custom?.broadcastMessage || '',
           customAdded: false,
           active: custom?.active !== false,
+          visibleForBooking: custom?.visibleForBooking !== undefined ? custom.visibleForBooking : (baseLab.visibleForBooking !== false),
         };
       });
 
@@ -191,6 +192,7 @@ export function subscribeToLabs(callback: (labs: Lab[]) => void): () => void {
             broadcastMessage: custom.broadcastMessage || '',
             customAdded: true,
             active: true,
+            visibleForBooking: custom.visibleForBooking !== undefined ? custom.visibleForBooking : true,
           });
         }
       });
@@ -224,6 +226,7 @@ export async function saveLab(
     badgeColor?: string;
     location?: string;
     softwares?: string[];
+    visibleForBooking?: boolean;
   }
 ): Promise<Lab> {
   const isMobile = labData.isMobile !== undefined ? labData.isMobile : (labData.type === 'mobile');
@@ -248,6 +251,7 @@ export async function saveLab(
     broadcastMessage: '',
     customAdded: !LAB_LIST.some((l) => l.id === labId),
     active: true,
+    visibleForBooking: labData.visibleForBooking !== undefined ? labData.visibleForBooking : true,
     updatedAt: Date.now(),
   };
 
@@ -280,6 +284,7 @@ export async function saveLab(
           location: newLab.location,
           badgeColor: newLab.badgeColor,
           customAdded: newLab.customAdded,
+          visibleForBooking: newLab.visibleForBooking,
           active: true,
           updatedAt: Date.now(),
         },
@@ -291,6 +296,16 @@ export async function saveLab(
   }
 
   return newLab;
+}
+
+/**
+ * Atualiza a visibilidade do laboratório para agendamentos
+ */
+export async function updateLabVisibilityForBooking(
+  labId: string,
+  visibleForBooking: boolean,
+): Promise<void> {
+  await updateLab(labId, { visibleForBooking });
 }
 
 /**

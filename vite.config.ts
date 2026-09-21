@@ -1,12 +1,73 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+
+const suppressViteHmrPlugin = (): Plugin => ({
+  name: 'suppress-vite-hmr',
+  transformIndexHtml: {
+    order: 'pre',
+    handler() {
+      return [
+        {
+          tag: 'script',
+          injectTo: 'head-prepend',
+          children: `(function(){
+  try {
+    const OWS = window.WebSocket;
+    if (OWS) {
+      window.WebSocket = function(u, p) {
+        if (typeof u === 'string' && (u.includes('token=') || u.includes('vite-hmr') || p === 'vite-hmr')) {
+          const f = new EventTarget();
+          f.url = u; f.protocols = p; f.readyState = 1; f.OPEN = 1; f.CLOSED = 3; f.CONNECTING = 0; f.CLOSING = 2;
+          f.send = function() {};
+          f.close = function() { f.readyState = 3; f.dispatchEvent(new Event('close')); };
+          setTimeout(function() { f.dispatchEvent(new Event('open')); }, 0);
+          return f;
+        }
+        return new OWS(u, p);
+      };
+      window.WebSocket.prototype = OWS.prototype;
+      window.WebSocket.CONNECTING = OWS.CONNECTING;
+      window.WebSocket.OPEN = OWS.OPEN;
+      window.WebSocket.CLOSING = OWS.CLOSING;
+      window.WebSocket.CLOSED = OWS.CLOSED;
+    }
+    const oe = console.error;
+    console.error = function(...a) {
+      if (a.some(x => typeof x === 'string' && (x.includes('[vite]') || x.includes('failed to connect to websocket')))) return;
+      oe.apply(console, a);
+    };
+    const ow = console.warn;
+    console.warn = function(...a) {
+      if (a.some(x => typeof x === 'string' && x.includes('[vite]'))) return;
+      ow.apply(console, a);
+    };
+    window.addEventListener('error', function(e) {
+      if (e && ((e.message && e.message.includes('[vite]')) || (e.filename && e.filename.includes('@vite/client')))) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+    }, true);
+    window.addEventListener('unhandledrejection', function(e) {
+      if (e && e.reason && String(e.reason).includes('[vite]')) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+    }, true);
+  } catch (_e) {}
+})();`,
+        },
+      ];
+    },
+  },
+});
 
 export default defineConfig(() => {
   return {
     plugins: [
+      suppressViteHmrPlugin(),
       react(),
       tailwindcss(),
       VitePWA({
@@ -88,8 +149,7 @@ export default defineConfig(() => {
       },
     },
     server: {
-      hmr: process.env.DISABLE_HMR !== 'true',
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      hmr: false,
     },
   };
 });

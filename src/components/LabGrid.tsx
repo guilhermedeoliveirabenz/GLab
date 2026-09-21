@@ -13,6 +13,7 @@ import {
   FileText,
   Plus,
   Edit3,
+  EyeOff,
 } from 'lucide-react';
 import { getLabMaintenanceStatus } from '../lib/maintenanceUtils';
 import { LabModal } from './LabModal';
@@ -47,7 +48,9 @@ export const LabGrid: React.FC<LabGridProps> = ({
     setIsLabModalOpen(true);
   };
 
-  const filteredLabs = labs.filter((lab) => {
+  const visibleLabs = labs.filter((lab) => isAdmin || lab.visibleForBooking !== false);
+
+  const filteredLabs = visibleLabs.filter((lab) => {
     if (filterType === 'fixed' && lab.isMobile) return false;
     if (filterType === 'mobile' && !lab.isMobile) return false;
     if (searchQuery.trim()) {
@@ -66,67 +69,69 @@ export const LabGrid: React.FC<LabGridProps> = ({
   return (
     <div className="space-y-6">
       {/* Control Bar: Date selection & Filter & Admin Action */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4">
         {/* Date Filter */}
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
-          <span className="text-xs font-semibold text-slate-700 shrink-0">Consultar dia:</span>
+        <div className="flex items-center justify-between sm:justify-start gap-2 w-full md:w-auto">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+            <span className="text-xs font-semibold text-slate-700 shrink-0">Consultar dia:</span>
+          </div>
           <input
             id="lab-grid-date-picker"
             type="date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 font-medium"
+            className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 text-xs border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 font-medium min-h-[42px] sm:min-h-auto"
           />
         </div>
 
         {/* Filter buttons, search and add lab button */}
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full md:w-auto justify-end">
+          <div className="relative flex-1 sm:flex-initial">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               id="search-labs-input"
               type="text"
               placeholder="Filtrar por nome..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 w-40 sm:w-48"
+              className="w-full pl-8 pr-3 py-2 sm:py-1.5 text-xs border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600 sm:w-48 min-h-[42px] sm:min-h-auto"
             />
           </div>
 
-          <div className="flex border border-slate-200 rounded-lg p-0.5 bg-slate-50 text-xs">
+          <div className="grid grid-cols-3 sm:flex border border-slate-200 rounded-xl p-0.5 bg-slate-50 text-xs">
             <button
               id="filter-labs-all-btn"
               onClick={() => setFilterType('all')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+              className={`px-2.5 py-2 sm:py-1 rounded-lg font-medium transition-colors cursor-pointer text-center ${
                 filterType === 'all'
-                  ? 'bg-white text-slate-900 shadow-xs'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Todos ({labs.length})
+              Todos ({visibleLabs.length})
             </button>
             <button
               id="filter-labs-fixed-btn"
               onClick={() => setFilterType('fixed')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+              className={`px-2.5 py-2 sm:py-1 rounded-lg font-medium transition-colors cursor-pointer text-center ${
                 filterType === 'fixed'
-                  ? 'bg-white text-blue-700 shadow-xs'
+                  ? 'bg-white text-blue-700 shadow-xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Fixos ({labs.filter((l) => !l.isMobile).length})
+              Fixos ({visibleLabs.filter((l) => !l.isMobile).length})
             </button>
             <button
               id="filter-labs-mobile-btn"
               onClick={() => setFilterType('mobile')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+              className={`px-2.5 py-2 sm:py-1 rounded-lg font-medium transition-colors cursor-pointer text-center ${
                 filterType === 'mobile'
-                  ? 'bg-white text-rose-700 shadow-xs'
+                  ? 'bg-white text-rose-700 shadow-xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Móveis ({labs.filter((l) => l.isMobile).length})
+              Móveis ({visibleLabs.filter((l) => l.isMobile).length})
             </button>
           </div>
 
@@ -135,7 +140,7 @@ export const LabGrid: React.FC<LabGridProps> = ({
               id="add-new-lab-btn"
               type="button"
               onClick={handleOpenAddLab}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              className="px-3.5 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[42px] sm:min-h-auto"
               title="Cadastrar um novo laboratório no sistema"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -202,6 +207,15 @@ export const LabGrid: React.FC<LabGridProps> = ({
                             Manut. Agendada
                           </span>
                         ) : null}
+                        {lab.visibleForBooking === false && (
+                          <span
+                            className="text-[9px] font-bold bg-slate-100 text-slate-700 border border-slate-300 px-1.5 py-0.5 rounded-sm flex items-center gap-0.5"
+                            title="Oculto para agendamento pelos professores"
+                          >
+                            <EyeOff className="w-2.5 h-2.5 text-slate-500" />
+                            <span>Oculto p/ Agendamento</span>
+                          </span>
+                        )}
                       </div>
                       <span className="text-[11px] text-slate-600">
                         {lab.isMobile ? 'Laboratório Móvel' : 'Laboratório Fixo'}
@@ -418,8 +432,16 @@ export const LabGrid: React.FC<LabGridProps> = ({
                       className="flex-1 py-2 px-3 text-xs font-semibold text-blue-700 bg-white hover:bg-blue-600 hover:text-white border border-blue-200 hover:border-blue-600 rounded-xl transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Calendar className="w-3.5 h-3.5" />
-                      <span>Agendar {lab.name}</span>
+                      <span>
+                        Agendar {lab.name}
+                        {lab.visibleForBooking === false ? ' (Oculto)' : ''}
+                      </span>
                     </button>
+                  </div>
+                ) : lab.visibleForBooking === false ? (
+                  <div className="w-full py-2 px-3 text-xs font-semibold text-slate-500 bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-center gap-1.5 text-center">
+                    <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Indisponível para agendamento</span>
                   </div>
                 ) : (
                   <button
