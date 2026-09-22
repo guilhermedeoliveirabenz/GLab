@@ -191,7 +191,7 @@ interface BookingCalendarProps {
   labs?: Lab[];
   isAdmin?: boolean;
   onSelectBooking?: (booking: Booking) => void;
-  onRequestNewBooking?: (date: string, shift?: ShiftType) => void;
+  onRequestNewBooking?: (date: string, shift?: ShiftType, labId?: string) => void;
   onOpenBatchImport?: () => void;
 }
 
@@ -832,12 +832,12 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                           }),
                         });
                       } else if (onRequestNewBooking) {
-                        onRequestNewBooking(dayObj.dateStr);
+                        onRequestNewBooking(dayObj.dateStr, undefined, selectedLabId !== 'all' ? selectedLabId : undefined);
                       }
                       return;
                     }
                     if (onRequestNewBooking) {
-                      onRequestNewBooking(dayObj.dateStr);
+                      onRequestNewBooking(dayObj.dateStr, undefined, selectedLabId !== 'all' ? selectedLabId : undefined);
                     }
                   }}
                   title={dayObj.isCurrentMonth ? `Dia ${formatDateBR(dayObj.dateStr)} - Toque para ver ou agendar` : undefined}
@@ -910,7 +910,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onRequestNewBooking(dayObj.dateStr);
+                              onRequestNewBooking(dayObj.dateStr, undefined, selectedLabId !== 'all' ? selectedLabId : undefined);
                             }}
                             title="Agendar aula nesta data"
                             className="opacity-0 group-hover:opacity-100 hover:opacity-100 flex items-center gap-0.5 bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded transition-all cursor-pointer shadow-2xs"
@@ -1128,7 +1128,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                       {onRequestNewBooking && (
                         <button
                           type="button"
-                          onClick={() => onRequestNewBooking(selectedMobileDate)}
+                          onClick={() => onRequestNewBooking(selectedMobileDate, undefined, selectedLabId !== 'all' ? selectedLabId : undefined)}
                           className="text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1 rounded-lg shadow-2xs flex items-center gap-1 cursor-pointer"
                         >
                           <Plus className="w-3 h-3" />
@@ -1263,7 +1263,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                 return (
                   <div
                     key={dayObj.dateStr}
-                    onClick={() => onRequestNewBooking?.(dayObj.dateStr)}
+                    onClick={() => onRequestNewBooking?.(dayObj.dateStr, undefined, selectedLabId !== 'all' ? selectedLabId : undefined)}
                     className={`py-2.5 px-2 transition-colors cursor-pointer hover:bg-blue-50/80 group ${
                       isToday
                         ? 'bg-blue-50/80 ring-2 ring-blue-500 ring-inset'
@@ -1354,7 +1354,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                     return (
                       <div
                         key={`${dayObj.dateStr}-${period.id}`}
-                        onClick={() => onRequestNewBooking?.(dayObj.dateStr, period.id)}
+                        onClick={() => onRequestNewBooking?.(dayObj.dateStr, period.id, selectedLabId !== 'all' ? selectedLabId : undefined)}
                         className={`p-2 space-y-2 transition-colors cursor-pointer flex flex-col justify-start min-h-[160px] ${
                           dayObj.dateStr === todayStr ? 'bg-blue-50/15' : period.lightBg
                         } hover:bg-blue-50/30 group`}
@@ -1473,7 +1473,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                           <div
                             onClick={(e) => {
                               e.stopPropagation();
-                              onRequestNewBooking?.(dayObj.dateStr, period.id);
+                              onRequestNewBooking?.(dayObj.dateStr, period.id, selectedLabId !== 'all' ? selectedLabId : undefined);
                             }}
                             className="p-1.5 rounded-lg border border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50/50 text-center transition-colors cursor-pointer"
                             title={`Período parcialmente ocupado (${Math.round((totalBookedMinutes / period.totalDurationMinutes) * 100)}%). Clique para agendar no restante do período.`}
@@ -1531,7 +1531,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
               {onRequestNewBooking && (
                 <button
                   type="button"
-                  onClick={() => onRequestNewBooking(currentDateStr)}
+                  onClick={() => onRequestNewBooking(currentDateStr, undefined, selectedLabId !== 'all' ? selectedLabId : undefined)}
                   className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
@@ -1558,7 +1558,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                 <div
                   key={`day-summary-${period.id}`}
                   onClick={() => {
-                    if (onRequestNewBooking) onRequestNewBooking(currentDateStr, period.id);
+                    if (onRequestNewBooking) onRequestNewBooking(currentDateStr, period.id, selectedLabId !== 'all' ? selectedLabId : undefined);
                   }}
                   className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:shadow-xs ${
                     period.borderClass
@@ -1724,7 +1724,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                       {onRequestNewBooking && (
                         <button
                           type="button"
-                          onClick={() => onRequestNewBooking(currentDateStr, period.id)}
+                          onClick={() => onRequestNewBooking(currentDateStr, period.id, selectedLabId !== 'all' ? selectedLabId : undefined)}
                           className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
                         >
                           <Plus className="w-3.5 h-3.5" />
@@ -1738,7 +1738,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                   <div className="p-4 sm:p-5">
                     {periodBookings.length === 0 ? (
                       <div
-                        onClick={() => onRequestNewBooking?.(currentDateStr, period.id)}
+                        onClick={() => onRequestNewBooking?.(currentDateStr, period.id, selectedLabId !== 'all' ? selectedLabId : undefined)}
                         className="py-10 px-4 text-center rounded-xl border-2 border-dashed border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all cursor-pointer group"
                       >
                         <PeriodIcon className={`w-8 h-8 ${period.accentColor} mx-auto mb-2 opacity-60 group-hover:scale-110 transition-transform`} />
@@ -1868,7 +1868,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                         {/* Banner de Espaço Livre Restante se for parcial */}
                         {totalBookedMinutes < 180 && (
                           <div
-                            onClick={() => onRequestNewBooking?.(currentDateStr, period.id)}
+                            onClick={() => onRequestNewBooking?.(currentDateStr, period.id, selectedLabId !== 'all' ? selectedLabId : undefined)}
                             className="p-3 rounded-xl border border-dashed border-blue-300 bg-blue-50/40 hover:bg-blue-50 text-blue-900 flex items-center justify-between transition-colors cursor-pointer"
                           >
                             <div className="flex items-center gap-2 text-xs">
@@ -2363,7 +2363,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                       onClick={() => {
                         const targetDateStr = dayExpandedModal.dateStr;
                         setDayExpandedModal(null);
-                        onRequestNewBooking(targetDateStr);
+                        onRequestNewBooking(targetDateStr, undefined, selectedLabId !== 'all' ? selectedLabId : undefined);
                       }}
                       className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
                     >

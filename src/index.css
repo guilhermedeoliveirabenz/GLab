@@ -29,3 +29,19 @@
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
 }
+
+@keyframes indeterminate-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  60% {
+    transform: translateX(60%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.animate-indeterminate-bar {
+  animation: indeterminate-bar 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

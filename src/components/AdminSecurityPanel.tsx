@@ -218,7 +218,7 @@ export const AdminSecurityPanel: React.FC = () => {
         notifyAllAdmins: notifyAdmins,
         notifyAssignedTechnicians: notifyTechs,
         smtp: {
-          enabled: smtpEnabled,
+          enabled: Boolean(smtpUser.trim() && smtpPass.trim()) || smtpEnabled,
           host: smtpHost.trim(),
           port: Number(smtpPort) || 587,
           secure: smtpSecure,
@@ -1042,7 +1042,16 @@ export const AdminSecurityPanel: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer bg-white px-2.5 py-1.5 rounded-lg border border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={smtpEnabled}
+                    onChange={(e) => setSmtpEnabled(e.target.checked)}
+                    className="w-3.5 h-3.5 text-blue-600 rounded-sm border-slate-300 focus:ring-blue-500"
+                  />
+                  <span>Ativar Envio SMTP</span>
+                </label>
                 <button
                   type="button"
                   onClick={handleTestSmtpConnection}

@@ -43,9 +43,21 @@ import {
   EyeOff,
   Mail,
   Send,
+  Copy,
+  ExternalLink,
+  RefreshCw,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { playBookingSuccessSound } from '../lib/soundUtils';
-import { sendBookingNotificationEmail, generateMailtoUrl } from '../lib/emailService';
+import {
+  sendBookingNotificationEmail,
+  generateMailtoUrl,
+  generateGmailWebComposeUrl,
+  generateOutlookWebComposeUrl,
+  generateBookingEmailContent,
+} from '../lib/emailService';
 
 interface BookingFormProps {
   existingBookings: Booking[];
@@ -103,13 +115,13 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [scheduleLabel, setScheduleLabel] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Sincroniza se laboratório selecionado não estiver mais entre os disponíveis
+  // Sincroniza se laboratório selecionado não estiver mais entre os disponíveis caso a lista remota mude
   useEffect(() => {
     if (!isAdmin && availableLabs.length > 0 && !availableLabs.some((l) => l.id === labId)) {
       setLabId(availableLabs[0].id);
       setRequestedMachines(availableLabs[0].capacity);
     }
-  }, [availableLabs, isAdmin, labId]);
+  }, [availableLabs, isAdmin]);
 
   // Recurring Booking State
   const [isRecurring, setIsRecurring] = useState(false);
@@ -130,6 +142,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [emailSentStatus, setEmailSentStatus] = useState<boolean>(false);
   const [emailProtocol, setEmailProtocol] = useState<string>('smtp');
+  const [emailSendingState, setEmailSendingState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [showRecipientsList, setShowRecipientsList] = useState(false);
+  const [resendingEmail, setResendingEmail] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
+  const [copiedEmailText, setCopiedEmailText] = useState(false);
 
   // Validação em tempo real da regra de antecedência de 3 a 20 dias úteis
   const dateValidation = validateBookingLeadTime(date);
@@ -146,47 +163,60 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     }
   }, [teacherSession]);
 
-  // Sincroniza quando o usuário clica em uma data no calendário
+  // Refs para rastrear props pré-selecionados e evitar que efeitos re-sobrescrevam as escolhas manuais do usuário
+  const lastPreselectedDateRef = React.useRef<string | undefined>(preselectedDate);
+  const lastPreselectedShiftRef = React.useRef<ShiftType | undefined>(preselectedShift);
+  const lastPreselectedLabIdRef = React.useRef<string | undefined>(preselectedLabId);
+
+  // Sincroniza quando o usuário clica em uma nova data no calendário (apenas quando o prop preselectedDate mudar externamente)
   useEffect(() => {
-    if (preselectedDate) {
+    if (preselectedDate && preselectedDate !== lastPreselectedDateRef.current) {
+      lastPreselectedDateRef.current = preselectedDate;
       setDate(preselectedDate);
       setRecurrenceEndDate(calculateEndDateFromCount(preselectedDate, recurrenceFrequency, recurrenceCount, skipWeekends));
+    } else if (!preselectedDate) {
+      lastPreselectedDateRef.current = '';
     }
   }, [preselectedDate, recurrenceFrequency, recurrenceCount, skipWeekends]);
 
-  // Sincroniza quando um turno pré-selecionado é fornecido a partir do calendário
+  // Sincroniza quando um novo turno pré-selecionado é fornecido a partir do calendário
   useEffect(() => {
-    if (preselectedShift === 'manha') {
-      setStartTime('07:30');
-      setEndTime('11:55');
-      setScheduleLabel('Período Manhã Completo');
-    } else if (preselectedShift === 'tarde') {
-      setStartTime('13:15');
-      setEndTime('17:40');
-      setScheduleLabel('Período Tarde Completo');
-    } else if (preselectedShift === 'noite') {
-      setStartTime('19:00');
-      setEndTime('22:15');
-      setScheduleLabel('Período Noite Completo');
+    if (preselectedShift && preselectedShift !== lastPreselectedShiftRef.current) {
+      lastPreselectedShiftRef.current = preselectedShift;
+      if (preselectedShift === 'manha') {
+        setStartTime('07:30');
+        setEndTime('11:55');
+        setScheduleLabel('Período Manhã Completo');
+      } else if (preselectedShift === 'tarde') {
+        setStartTime('13:15');
+        setEndTime('17:40');
+        setScheduleLabel('Período Tarde Completo');
+      } else if (preselectedShift === 'noite') {
+        setStartTime('19:00');
+        setEndTime('22:15');
+        setScheduleLabel('Período Noite Completo');
+      }
+    } else if (!preselectedShift) {
+      lastPreselectedShiftRef.current = undefined;
     }
   }, [preselectedShift]);
 
-  // Sincroniza quando um lab pré-selecionado é fornecido
+  // Sincroniza quando um lab pré-selecionado é fornecido externamente (NÃO re-sobrescreve quando o usuário altera manualmente o laboratório)
   useEffect(() => {
-    if (preselectedLabId) {
-      const isValid = availableLabs.some((l) => l.id === preselectedLabId);
+    if (preselectedLabId && preselectedLabId !== lastPreselectedLabIdRef.current) {
+      lastPreselectedLabIdRef.current = preselectedLabId;
+      const isValid = availableLabs.some((l) => l.id === preselectedLabId) || (isAdmin && labs.some((l) => l.id === preselectedLabId));
       if (isValid) {
         setLabId(preselectedLabId);
-        const lab = availableLabs.find((l) => l.id === preselectedLabId);
+        const lab = labs.find((l) => l.id === preselectedLabId);
         if (lab) {
           setRequestedMachines(lab.capacity);
         }
-      } else if (availableLabs.length > 0 && !availableLabs.some((l) => l.id === labId)) {
-        setLabId(availableLabs[0].id);
-        setRequestedMachines(availableLabs[0].capacity);
       }
+    } else if (!preselectedLabId) {
+      lastPreselectedLabIdRef.current = '';
     }
-  }, [preselectedLabId, availableLabs, labId]);
+  }, [preselectedLabId, availableLabs, labs, isAdmin]);
 
   // Adjust machines when selected lab changes
   const handleLabChange = (newLabId: string) => {
@@ -390,16 +420,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         setRecurringSuccessCount(createdList.length);
         onBookingCreated?.(createdList[0]);
 
-        // Dispara notificação por e-mail para os técnicos e administradores responsáveis
-        sendBookingNotificationEmail(createdList[0])
-          .then((emailRes) => {
-            setEmailRecipients(emailRes.recipients || []);
-            setEmailSentStatus(emailRes.success);
-            if (emailRes.protocol) {
-              setEmailProtocol(emailRes.protocol);
-            }
-          })
-          .catch((err) => console.warn('Falha ao enviar e-mail de notificação:', err));
+        // Dispara notificação por e-mail com indicador de envio animado
+        triggerEmailNotification(createdList[0]);
       }
     } catch (e) {
       console.error('Erro ao agendar com recorrência:', e);
@@ -529,22 +551,62 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       onBookingCreated?.(created);
       setNotes('');
 
-      // Dispara notificação por e-mail para os técnicos e administradores responsáveis
-      try {
-        const emailRes = await sendBookingNotificationEmail(created);
-        setEmailRecipients(emailRes.recipients || []);
-        setEmailSentStatus(emailRes.success);
-        if (emailRes.protocol) {
-          setEmailProtocol(emailRes.protocol);
-        }
-      } catch (emailErr) {
-        console.warn('Falha ao enviar e-mail de notificação:', emailErr);
-      }
+      // Dispara notificação por e-mail aos responsáveis com animação de envio
+      triggerEmailNotification(created);
     } catch (err) {
       console.error('Erro ao agendar:', err);
       setConflictError('Ocorreu um erro ao gravar o agendamento. Tente novamente.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const triggerEmailNotification = async (booking: Booking) => {
+    setEmailSendingState('sending');
+    setEmailFeedback(null);
+    const startTime = Date.now();
+    try {
+      const emailRes = await sendBookingNotificationEmail(booking);
+      const elapsed = Date.now() - startTime;
+      // Garante uma transição suave e perceptível da animação (mínimo ~850ms)
+      if (elapsed < 850) {
+        await new Promise((resolve) => setTimeout(resolve, 850 - elapsed));
+      }
+      setEmailRecipients(emailRes.recipients || []);
+      setEmailSentStatus(emailRes.success);
+      if (emailRes.protocol) {
+        setEmailProtocol(emailRes.protocol);
+      }
+      if (emailRes.success) {
+        setEmailSendingState('sent');
+      } else {
+        setEmailSendingState('error');
+        setEmailFeedback(emailRes.error || 'Não foi possível disparar o e-mail automaticamente.');
+      }
+    } catch (emailErr: any) {
+      console.warn('Falha ao enviar e-mail de notificação:', emailErr);
+      setEmailSendingState('error');
+      setEmailFeedback(emailErr?.message || 'Falha na conexão ao disparar e-mail.');
+    }
+  };
+
+  const handleResendEmail = async (booking: Booking) => {
+    setResendingEmail(true);
+    await triggerEmailNotification(booking);
+    setResendingEmail(false);
+  };
+
+  const handleCopyEmailContent = (booking: Booking) => {
+    try {
+      const { subject: emailSub, text } = generateBookingEmailContent(booking);
+      const recText = emailRecipients.length > 0 ? emailRecipients.join(', ') : 'Técnicos e Administradores';
+      const full = `Assunto: ${emailSub}\nDestinatários: ${recText}\n\n${text}`;
+      navigator.clipboard.writeText(full).then(() => {
+        setCopiedEmailText(true);
+        setTimeout(() => setCopiedEmailText(false), 3000);
+      });
+    } catch (e) {
+      console.warn('Falha ao copiar:', e);
     }
   };
 
@@ -554,6 +616,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     setConflictError(null);
     setEmailRecipients([]);
     setEmailSentStatus(false);
+    setEmailSendingState('idle');
+    setShowRecipientsList(false);
+    setResendingEmail(false);
+    setEmailFeedback(null);
+    setCopiedEmailText(false);
     setClassGroup('');
     setSubject('');
     setRoomNumber('');
@@ -643,71 +710,222 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           </div>
         </div>
 
-        {/* Notificação por E-mail para Técnicos e Administradores */}
+        {/* Notificação por E-mail para Responsáveis - Visual Discreto com Animação de Envio */}
         <div
           id="booking-email-notification-banner"
-          className="bg-blue-50/90 border border-blue-200 rounded-xl p-4 text-left text-sm mb-6"
+          className="bg-slate-50/90 border border-slate-200/90 rounded-xl p-3.5 sm:p-4 text-left text-sm mb-6 transition-all duration-300"
         >
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-blue-600 text-white rounded-lg shrink-0 mt-0.5 shadow-2xs">
-              <Mail className="w-5 h-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h4 className="font-bold text-blue-950 text-sm">
-                  Notificação por E-mail aos Responsáveis
-                </h4>
-                <span className="bg-blue-200/90 text-blue-900 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">
-                  {emailSentStatus ? 'Disparado' : 'Automático'}
-                </span>
-                {emailProtocol === 'smtp' && (
-                  <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wide flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                    SMTP Relay
+          {emailSendingState === 'sending' ? (
+            /* Estado 1: Enviando notificação com animação visual discreta */
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0 mt-0.5">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-800">
+                    Enviando notificação por e-mail...
                   </span>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                    Enviando
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Notificando a equipe de suporte e responsáveis pelo laboratório...
+                </p>
+                {/* Linha animada de progresso suave */}
+                <div className="w-full bg-slate-200/80 h-1 rounded-full overflow-hidden mt-2.5 relative">
+                  <div className="absolute top-0 bottom-0 left-0 w-1/3 bg-blue-500 rounded-full animate-indeterminate-bar" />
+                </div>
+              </div>
+            </div>
+          ) : emailSendingState === 'sent' || emailSentStatus ? (
+            /* Estado 2: Ao fim do envio, informa discretamente que foi enviado */
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-emerald-50 border border-emerald-200/70 flex items-center justify-center text-emerald-600 shrink-0 mt-0.5">
+                <Check className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-800">
+                      Notificação por e-mail enviada
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Enviado
+                    </span>
+                  </div>
+
+                  {/* Toggle para detalhes / ações secundárias */}
+                  <button
+                    type="button"
+                    id="btn-toggle-email-details"
+                    onClick={() => setShowRecipientsList(!showRecipientsList)}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 font-medium inline-flex items-center gap-1 cursor-pointer transition-colors px-1.5 py-0.5 rounded hover:bg-slate-100"
+                  >
+                    <span>
+                      {showRecipientsList
+                        ? 'Ocultar detalhes'
+                        : emailRecipients.length > 0
+                          ? `${emailRecipients.length} destinatário(s)`
+                          : 'Ver opções'}
+                    </span>
+                    {showRecipientsList ? (
+                      <ChevronUp className="w-3 h-3 text-slate-400" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3 text-slate-400" />
+                    )}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Os responsáveis pelo laboratório foram notificados automaticamente com os dados da reserva.
+                </p>
+
+                {/* Detalhes expansíveis com destinatários e atalhos discretos */}
+                {showRecipientsList && (
+                  <div className="mt-3 pt-2.5 border-t border-slate-200/80 space-y-2.5 animate-fade-in">
+                    {emailRecipients.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {emailRecipients.map((rec) => (
+                          <span
+                            key={rec}
+                            className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] px-2 py-0.5 rounded-md"
+                          >
+                            <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                            <span className="truncate max-w-[200px] sm:max-w-none">{rec}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Ações discretas */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <a
+                        id="btn-open-gmail-web"
+                        href={generateGmailWebComposeUrl(
+                          successBooking,
+                          emailRecipients.length > 0 ? emailRecipients : ['guilherme.benz@unasp.edu.br'],
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-medium rounded-md transition-colors shadow-2xs"
+                        title="Abrir no Gmail Web"
+                      >
+                        <Mail className="w-3 h-3 text-red-500" />
+                        <span>Gmail</span>
+                        <ExternalLink className="w-2.5 h-2.5 text-slate-400" />
+                      </a>
+
+                      <a
+                        id="btn-open-outlook-web"
+                        href={generateOutlookWebComposeUrl(
+                          successBooking,
+                          emailRecipients.length > 0 ? emailRecipients : ['guilherme.benz@unasp.edu.br'],
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-medium rounded-md transition-colors shadow-2xs"
+                        title="Abrir no Outlook Web"
+                      >
+                        <Mail className="w-3 h-3 text-sky-500" />
+                        <span>Outlook</span>
+                        <ExternalLink className="w-2.5 h-2.5 text-slate-400" />
+                      </a>
+
+                      <button
+                        type="button"
+                        id="btn-copy-email-text"
+                        onClick={() => handleCopyEmailContent(successBooking)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-medium rounded-md transition-colors shadow-2xs cursor-pointer"
+                        title="Copiar dados da reserva"
+                      >
+                        {copiedEmailText ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            <span className="text-emerald-700">Copiado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3 text-slate-400" />
+                            <span>Copiar dados</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        id="btn-resend-email-smtp"
+                        disabled={resendingEmail}
+                        onClick={() => handleResendEmail(successBooking)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-medium rounded-md transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+                        title="Reenviar notificação por e-mail"
+                      >
+                        <RefreshCw
+                          className={`w-3 h-3 ${resendingEmail ? 'animate-spin text-blue-600' : 'text-slate-400'}`}
+                        />
+                        <span>{resendingEmail ? 'Reenviando...' : 'Reenviar'}</span>
+                      </button>
+                    </div>
+
+                    {emailFeedback && (
+                      <div className="mt-1.5 text-[11px] font-medium text-slate-700 bg-white border border-slate-200 rounded p-1.5 flex items-center gap-1.5">
+                        <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span>{emailFeedback}</span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-              <p className="text-xs text-blue-800 mt-1 leading-relaxed">
-                Os dados completos desta reserva foram encaminhados por e-mail para a equipe de técnicos e administradores:
-              </p>
-
-              {emailRecipients.length > 0 ? (
-                <div className="mt-2.5 flex flex-wrap gap-1.5">
-                  {emailRecipients.map((rec) => (
-                    <span
-                      key={rec}
-                      className="inline-flex items-center gap-1 bg-white border border-blue-300/80 text-blue-900 text-xs font-semibold px-2.5 py-1 rounded-lg shadow-2xs"
-                    >
-                      <Mail className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                      <span className="truncate max-w-[240px] sm:max-w-none">{rec}</span>
-                    </span>
-                  ))}
+            </div>
+          ) : (
+            /* Estado 3: Pendente ou Erro discreto com opção de reenvio */
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-amber-50 border border-amber-200/70 flex items-center justify-center text-amber-600 shrink-0 mt-0.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-slate-800">
+                    Notificação automática pendente
+                  </span>
+                  <button
+                    type="button"
+                    disabled={resendingEmail}
+                    onClick={() => handleResendEmail(successBooking)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${resendingEmail ? 'animate-spin' : ''}`} />
+                    <span>{resendingEmail ? 'Tentando...' : 'Tentar novamente'}</span>
+                  </button>
                 </div>
-              ) : (
-                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-1.5">
-                  <Info className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>Nenhum e-mail de técnico ou administrador cadastrado para este laboratório. Os e-mails podem ser configurados no Painel do GestLab.</span>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {emailFeedback || 'Não foi possível disparar o e-mail automático aos responsáveis.'}
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyEmailContent(successBooking)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-medium rounded-md transition-colors cursor-pointer"
+                  >
+                    {copiedEmailText ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-600" />
+                        <span className="text-emerald-700">Copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3 text-slate-400" />
+                        <span>Copiar dados da reserva</span>
+                      </>
+                    )}
+                  </button>
                 </div>
-              )}
-
-              {/* Botão de envio rápido ou abertura no cliente de e-mail local */}
-              <div className="mt-3 pt-2.5 border-t border-blue-200/70 flex flex-wrap items-center gap-2">
-                <a
-                  id="btn-open-booking-mailto"
-                  href={generateMailtoUrl(
-                    successBooking,
-                    emailRecipients.length > 0 ? emailRecipients : ['gestlab@escola.edu.br'],
-                  )}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer shadow-2xs"
-                >
-                  <Send className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Abrir no seu E-mail (Gmail / Outlook)</span>
-                </a>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         <button

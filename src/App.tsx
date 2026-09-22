@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { Booking, Lab, LAB_LIST, ShiftType } from './types';
-import { subscribeToBookings, deduplicateBookings } from './lib/bookingService';
+import { subscribeToBookings, deduplicateBookings, isSelfCreatedBooking, markBookingAsSelfCreated } from './lib/bookingService';
 import { subscribeToLabs } from './lib/labService';
+import { subscribeToEmailSettings } from './lib/settingsService';
 import { Navbar, ActiveTab } from './components/Navbar';
 import { LabGrid } from './components/LabGrid';
 import { BookingForm } from './components/BookingForm';
@@ -29,7 +30,7 @@ import {
 } from 'lucide-react';
 
 function AppContent() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, teacherSession } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [labs, setLabs] = useState<Lab[]>(LAB_LIST);
   const [activeTab, setActiveTab] = useState<ActiveTab>('calendar');
@@ -42,6 +43,12 @@ function AppContent() {
 
   const isInitialLoadRef = React.useRef(true);
   const prevBookingsRef = React.useRef<Booking[]>([]);
+  const teacherSessionRef = React.useRef(teacherSession);
+
+  // Mantém a referência da sessão do professor atualizada para uso nas callbacks
+  useEffect(() => {
+    teacherSessionRef.current = teacherSession;
+  }, [teacherSession]);
 
   // Inscrição em tempo real no Firestore para agendamentos e laboratórios
   useEffect(() => {
@@ -50,7 +57,35 @@ function AppContent() {
       // Se não for a carga inicial e houver novos agendamentos criados, dispara alerta
       if (!isInitialLoadRef.current) {
         const prevIds = new Set(prevBookingsRef.current.map((b) => b.id));
-        const newArrivals = data.filter((b) => !prevIds.has(b.id) && b.status === 'pending');
+        const newArrivals = data.filter((b) => {
+          if (prevIds.has(b.id)) return false;
+          if (b.status !== 'pending') return false;
+
+          // REGRA MANDATÓRIA: Para quem fez o agendamento, esta mensagem NUNCA deve aparecer
+          // 1. Se o agendamento foi registrado/submetido neste navegador/sessão
+          if (isSelfCreatedBooking(b.id)) {
+            return false;
+          }
+
+          // 2. Se a sessão de professor ativa for o mesmo autor do agendamento (telefone ou nome)
+          const currentTeacher = teacherSessionRef.current;
+          if (currentTeacher) {
+            const cleanBookingPhone = (b.whatsapp || '').replace(/\D/g, '');
+            const cleanTeacherPhone = (currentTeacher.phone || '').replace(/\D/g, '');
+            if (cleanTeacherPhone && cleanBookingPhone && cleanTeacherPhone === cleanBookingPhone) {
+              return false;
+            }
+            if (
+              currentTeacher.name &&
+              b.teacherName &&
+              b.teacherName.trim().toLowerCase() === currentTeacher.name.trim().toLowerCase()
+            ) {
+              return false;
+            }
+          }
+
+          return true;
+        });
 
         if (newArrivals.length > 0) {
           const newest = newArrivals[0];
@@ -78,9 +113,13 @@ function AppContent() {
     const unsubLabs = subscribeToLabs((data) => {
       setLabs(data);
     });
+    const unsubEmailSettings = subscribeToEmailSettings(() => {
+      // Sincroniza em tempo real as configurações de e-mail e lista de destinatários em cache
+    });
     return () => {
       unsubBookings();
       unsubLabs();
+      unsubEmailSettings();
     };
   }, []);
 
@@ -99,21 +138,35 @@ function AppContent() {
       return;
     }
     setPreselectedLabId(labId);
+    setPreselectedDate('');
+    setPreselectedShift(undefined);
     setActiveTab('booking');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenBooking = () => {
-    const firstVisible = labs.find((l) => isAdmin || l.visibleForBooking !== false);
-    setPreselectedLabId(firstVisible?.id || '');
+    setPreselectedLabId('');
+    setPreselectedDate('');
     setPreselectedShift(undefined);
     setActiveTab('booking');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBookingCreated = (newBooking: Booking) => {
-    // Mantém no histórico e pode redirecionar para a visualização
+    markBookingAsSelfCreated(newBooking.id);
+    // Garante que qualquer alerta aberto seja fechado caso corresponda ao novo agendamento
+    setLatestNewBookingAlert((prev) => (prev?.id === newBooking.id ? null : prev));
   };
+
+  // Auto-dispensa do alerta flutuante após 10 segundos
+  useEffect(() => {
+    if (latestNewBookingAlert) {
+      const timer = setTimeout(() => {
+        setLatestNewBookingAlert(null);
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [latestNewBookingAlert]);
 
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-800 flex flex-col antialiased">
@@ -244,11 +297,10 @@ function AppContent() {
               bookings={bookings}
               labs={labs}
               onOpenBatchImport={isAdmin ? () => setIsBatchImportOpen(true) : undefined}
-              onRequestNewBooking={(date, shift) => {
+              onRequestNewBooking={(date, shift, labId) => {
                 setPreselectedDate(date);
                 setPreselectedShift(shift);
-                const firstVisible = labs.find((l) => isAdmin || l.visibleForBooking !== false);
-                setPreselectedLabId(firstVisible?.id || '');
+                setPreselectedLabId(labId && labId !== 'all' ? labId : '');
                 setActiveTab('booking');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
@@ -282,8 +334,8 @@ function AppContent() {
         </div>
       </footer>
 
-      {/* Alerta Flutuante em Tempo Real para Técnicos/Administradores */}
-      {latestNewBookingAlert && (
+      {/* Alerta Flutuante em Tempo Real para Técnicos/Administradores (não exibido para quem realizou o agendamento) */}
+      {latestNewBookingAlert && !isSelfCreatedBooking(latestNewBookingAlert.id) && (
         <div
           id="realtime-new-booking-toast"
           className="fixed bottom-5 right-5 z-50 max-w-sm w-full bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 animate-slide-up flex items-start gap-3"

@@ -16,6 +16,7 @@ import { formatDateBR } from './whatsapp';
 import { getLocalTechnicians } from './technicianService';
 import {
   getLocalEmailSettings,
+  getEmailSettings,
   getLocalInstitutionSubtitle,
   DEFAULT_ADMIN_NOTIFICATION_EMAIL,
 } from './settingsService';
@@ -52,14 +53,17 @@ export async function getRecipientsForBooking(
   booking: Booking,
   emailSettings?: EmailSettings,
 ): Promise<string[]> {
-  const settings = emailSettings || getLocalEmailSettings();
+  const settings = emailSettings || (await getEmailSettings());
   const recipientsSet = new Set<string>();
 
   // 1. E-mails cadastrados para receber as notificações (destinatários customizados e equipe)
   if (Array.isArray(settings.recipientEmails) && settings.recipientEmails.length > 0) {
     for (const email of settings.recipientEmails) {
       if (email && typeof email === 'string') {
-        const clean = email.trim().toLowerCase();
+        let clean = email.trim().toLowerCase();
+        if (clean.includes('@uansp.edu.br')) {
+          clean = clean.replace('@uansp.edu.br', '@unasp.edu.br');
+        }
         if (isValidEmail(clean)) {
           recipientsSet.add(clean);
         }
@@ -69,7 +73,10 @@ export async function getRecipientsForBooking(
 
   // E-mail geral do Administrador (retrocompatibilidade)
   if (settings.adminNotificationEmail && settings.adminNotificationEmail.trim()) {
-    const cleanAdminEmail = settings.adminNotificationEmail.trim().toLowerCase();
+    let cleanAdminEmail = settings.adminNotificationEmail.trim().toLowerCase();
+    if (cleanAdminEmail.includes('@uansp.edu.br')) {
+      cleanAdminEmail = cleanAdminEmail.replace('@uansp.edu.br', '@unasp.edu.br');
+    }
     if (isValidEmail(cleanAdminEmail)) {
       recipientsSet.add(cleanAdminEmail);
     }
@@ -96,11 +103,17 @@ export async function getRecipientsForBooking(
 
   for (const tech of techniciansList) {
     // Apenas usuários ativos com e-mail válido
-    if (!tech.active || !tech.email || !isValidEmail(tech.email)) {
+    if (!tech.active || !tech.email) {
       continue;
     }
 
-    const techEmail = tech.email.trim().toLowerCase();
+    let techEmail = tech.email.trim().toLowerCase();
+    if (techEmail.includes('@uansp.edu.br')) {
+      techEmail = techEmail.replace('@uansp.edu.br', '@unasp.edu.br');
+    }
+    if (!isValidEmail(techEmail)) {
+      continue;
+    }
 
     // Se for Administrador e a configuração permitir
     if (tech.role === 'admin' && settings.notifyAllAdmins) {
@@ -508,8 +521,8 @@ export async function sendEmailViaSmtp(
  */
 export async function sendBookingNotificationEmail(
   booking: Booking,
-): Promise<{ success: boolean; recipients: string[]; logId?: string; protocol?: string; error?: string }> {
-  const emailSettings = getLocalEmailSettings();
+): Promise<{ success: boolean; recipients: string[]; logId?: string; protocol?: string; error?: string; smtpResponse?: string }> {
+  const emailSettings = await getEmailSettings();
 
   if (!emailSettings.enabled) {
     console.log('Notificações por e-mail desativadas nas configurações.');
@@ -538,16 +551,14 @@ export async function sendBookingNotificationEmail(
   const logId = `email-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const now = Date.now();
 
-  // 3. Disparo Automático Real via Serviço SMTP (apenas se habilitado com credenciais)
+  // 3. Disparo Automático Real via Serviço SMTP
   let smtpSuccess = false;
   let smtpResponse: string | undefined;
+  let smtpErrorMessage: string | undefined;
 
-  const isSmtpConfigured =
-    Boolean(emailSettings.smtp?.enabled) &&
-    Boolean(emailSettings.smtp?.user?.trim()) &&
-    Boolean(emailSettings.smtp?.pass?.trim());
+  const isSmtpAllowed = emailSettings.smtp?.enabled !== false;
 
-  if (isSmtpConfigured) {
+  if (isSmtpAllowed) {
     try {
       const smtpRes = await sendEmailViaSmtp(recipients, subject, html, text, emailSettings.smtp);
       if (smtpRes.success) {
@@ -555,9 +566,11 @@ export async function sendBookingNotificationEmail(
         smtpResponse = smtpRes.response || 'SMTP 250 OK Message accepted';
         console.log('Notificação enviada com sucesso via SMTP para:', recipients);
       } else {
+        smtpErrorMessage = smtpRes.error;
         console.warn('Tentativa via SMTP retornou aviso:', smtpRes.error);
       }
-    } catch (smtpErr) {
+    } catch (smtpErr: any) {
+      smtpErrorMessage = smtpErr?.message || 'Falha ao conectar com o serviço SMTP';
       console.warn('Falha na requisição SMTP:', smtpErr);
     }
   }
@@ -568,13 +581,13 @@ export async function sendBookingNotificationEmail(
     subject,
     recipients,
     sentAt: now,
-    status: 'sent',
+    status: smtpSuccess ? 'sent' : (smtpErrorMessage ? 'failed' : 'sent'),
     type: 'booking_created',
     protocol: smtpSuccess ? 'smtp' : 'firebase',
     labName: booking.labName,
     teacherName: booking.teacherName,
     details: `${booking.date} • ${booking.timeSlot}`,
-    smtpResponse,
+    smtpResponse: smtpResponse || (smtpErrorMessage ? `Erro: ${smtpErrorMessage}` : undefined),
   };
 
   // Salva no cache local de logs
@@ -616,6 +629,8 @@ export async function sendBookingNotificationEmail(
     recipients,
     protocol: smtpSuccess ? 'smtp' : 'firebase',
     logId,
+    smtpResponse,
+    error: smtpErrorMessage,
   };
 }
 
@@ -626,7 +641,7 @@ export async function sendTestNotificationEmail(
   targetEmail?: string,
   smtpOverride?: SmtpConfig,
 ): Promise<{ success: boolean; recipients: string[]; error?: string; message?: string; protocol?: string }> {
-  const settings = getLocalEmailSettings();
+  const settings = await getEmailSettings();
   const subtitle = getLocalInstitutionSubtitle();
 
   const recipients = targetEmail
@@ -771,6 +786,34 @@ export function subscribeToEmailLogs(callback: (logs: EmailLog[]) => void): () =
  */
 export function generateMailtoUrl(booking: Booking, recipients: string[]): string {
   const { subject, text } = generateBookingEmailContent(booking);
-  const to = recipients.join(',');
-  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+  const cleanRecipients = recipients
+    .map((r) => r.trim().replace('@uansp.edu.br', '@unasp.edu.br'))
+    .filter(Boolean);
+  const to = cleanRecipients.join(',');
+  return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
 }
+
+/**
+ * Cria a URL para composição direta no Gmail Web (browser)
+ */
+export function generateGmailWebComposeUrl(booking: Booking, recipients: string[]): string {
+  const { subject, text } = generateBookingEmailContent(booking);
+  const cleanRecipients = recipients
+    .map((r) => r.trim().replace('@uansp.edu.br', '@unasp.edu.br'))
+    .filter(Boolean);
+  const to = cleanRecipients.join(',');
+  return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+}
+
+/**
+ * Cria a URL para composição direta no Microsoft Outlook Web / Office 365
+ */
+export function generateOutlookWebComposeUrl(booking: Booking, recipients: string[]): string {
+  const { subject, text } = generateBookingEmailContent(booking);
+  const cleanRecipients = recipients
+    .map((r) => r.trim().replace('@uansp.edu.br', '@unasp.edu.br'))
+    .filter(Boolean);
+  const to = cleanRecipients.join(',');
+  return `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+}
+

@@ -31,6 +31,9 @@ export function sanitizeTechnician(tech: Technician): Technician {
   const sanitized = { ...tech };
   delete sanitized.password;
   delete sanitized.passwordHash;
+  if (sanitized.email && sanitized.email.includes('@uansp.edu.br')) {
+    sanitized.email = sanitized.email.replace('@uansp.edu.br', '@unasp.edu.br');
+  }
   return sanitized;
 }
 
@@ -41,6 +44,9 @@ export function deduplicateTechnicians(list: Technician[]): Technician[] {
   const result: Technician[] = [];
   for (const item of list) {
     if (item && item.id && !seen.has(item.id)) {
+      if (item.email && item.email.includes('@uansp.edu.br')) {
+        item.email = item.email.replace('@uansp.edu.br', '@unasp.edu.br');
+      }
       seen.add(item.id);
       result.push(item);
     }

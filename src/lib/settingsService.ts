@@ -6,7 +6,7 @@ export const DEFAULT_INSTITUTION_SUBTITLE = 'CTI/UNASP-HT';
 export const DEFAULT_ADMIN_NOTIFICATION_EMAIL = 'guilhermebenz60@gmail.com';
 
 export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
-  enabled: false,
+  enabled: true,
   host: 'smtp.gmail.com',
   port: 587,
   secure: false,
@@ -41,12 +41,73 @@ export function getLocalEmailSettings(): EmailSettings {
       return {
         ...DEFAULT_EMAIL_SETTINGS,
         ...parsed,
+        smtp: {
+          ...DEFAULT_SMTP_CONFIG,
+          ...(parsed?.smtp || {}),
+          enabled: parsed?.smtp?.enabled !== undefined ? parsed.smtp.enabled : true,
+        },
       };
     }
   } catch (e) {
     console.warn('Erro ao ler configurações de e-mail do localStorage:', e);
   }
   return { ...DEFAULT_EMAIL_SETTINGS };
+}
+
+// Obtém as configurações de e-mail atualizadas diretamente do Firestore com fallback para o cache local
+export async function getEmailSettings(): Promise<EmailSettings> {
+  const local = getLocalEmailSettings();
+  if (!db) {
+    return local;
+  }
+
+  try {
+    const docRef = doc(db, SETTINGS_COLLECTION, EMAIL_SETTINGS_DOC);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data() as Partial<EmailSettings>;
+      const rawRecipients: string[] = Array.isArray(data.recipientEmails) && data.recipientEmails.length > 0
+        ? data.recipientEmails
+        : (data.adminNotificationEmail ? [data.adminNotificationEmail] : [DEFAULT_ADMIN_NOTIFICATION_EMAIL]);
+      const sanitizedRecipients = Array.from(
+        new Set(
+          rawRecipients
+            .map((r) => (typeof r === 'string' ? r.trim().toLowerCase() : ''))
+            .filter((r) => r.length > 0 && r.includes('@')),
+        ),
+      );
+
+      const hasSmtpCreds = Boolean(data.smtp?.user?.trim() && data.smtp?.pass?.trim());
+      const smtpEnabled = data.smtp?.enabled !== undefined ? data.smtp.enabled : (hasSmtpCreds || true);
+
+      const merged: EmailSettings = {
+        enabled: data.enabled !== undefined ? data.enabled : true,
+        adminNotificationEmail:
+          data.adminNotificationEmail && typeof data.adminNotificationEmail === 'string'
+            ? data.adminNotificationEmail.trim()
+            : (sanitizedRecipients[0] || DEFAULT_ADMIN_NOTIFICATION_EMAIL),
+        recipientEmails: sanitizedRecipients.length > 0 ? sanitizedRecipients : [DEFAULT_ADMIN_NOTIFICATION_EMAIL],
+        notifyAllAdmins: data.notifyAllAdmins !== undefined ? data.notifyAllAdmins : true,
+        notifyAssignedTechnicians:
+          data.notifyAssignedTechnicians !== undefined ? data.notifyAssignedTechnicians : true,
+        smtp: data.smtp
+          ? {
+              ...DEFAULT_SMTP_CONFIG,
+              ...data.smtp,
+              enabled: smtpEnabled,
+            }
+          : local.smtp || { ...DEFAULT_SMTP_CONFIG, enabled: true },
+        updatedAt: data.updatedAt,
+      };
+
+      setLocalEmailSettings(merged);
+      return merged;
+    }
+  } catch (err) {
+    console.warn('Erro ao obter configurações de e-mail do Firestore:', err);
+  }
+
+  return local;
 }
 
 // Salva as configurações de e-mail no cache local
@@ -100,8 +161,9 @@ export function subscribeToEmailSettings(callback: (settings: EmailSettings) => 
               ? {
                   ...DEFAULT_SMTP_CONFIG,
                   ...data.smtp,
+                  enabled: data.smtp.enabled !== undefined ? data.smtp.enabled : true,
                 }
-              : localSettings.smtp || { ...DEFAULT_SMTP_CONFIG },
+              : localSettings.smtp || { ...DEFAULT_SMTP_CONFIG, enabled: true },
             updatedAt: data.updatedAt,
           };
           setLocalEmailSettings(merged);
@@ -131,6 +193,16 @@ export async function updateEmailSettings(
   const updated: EmailSettings = {
     ...current,
     ...partial,
+    smtp: partial.smtp
+      ? {
+          ...(current.smtp || DEFAULT_SMTP_CONFIG),
+          ...partial.smtp,
+          enabled:
+            partial.smtp.enabled !== undefined
+              ? partial.smtp.enabled
+              : Boolean(partial.smtp.user?.trim() && partial.smtp.pass?.trim()) || current.smtp?.enabled || true,
+        }
+      : current.smtp,
     updatedAt: Date.now(),
   };
 

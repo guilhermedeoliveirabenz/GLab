@@ -19,6 +19,49 @@ const LOCAL_STORAGE_KEY = 'school_lab_bookings_cache';
 // Base de agendamentos inicial vazia (sem dados fictícios)
 const INITIAL_DEMO_BOOKINGS: Booking[] = [];
 
+// Rastreamento local dos agendamentos criados por esta sessão/dispositivo
+const selfCreatedBookingIds = new Set<string>();
+
+/**
+ * Marca um agendamento como criado localmente por este usuário/sessão
+ */
+export function markBookingAsSelfCreated(id: string): void {
+  if (!id) return;
+  selfCreatedBookingIds.add(id);
+  try {
+    const raw = sessionStorage.getItem('gestlab_self_created_booking_ids');
+    const list: string[] = raw ? JSON.parse(raw) : [];
+    if (!list.includes(id)) {
+      list.push(id);
+      if (list.length > 200) list.shift();
+      sessionStorage.setItem('gestlab_self_created_booking_ids', JSON.stringify(list));
+    }
+  } catch (e) {
+    // sessionStorage indisponível ou modo restrito
+  }
+}
+
+/**
+ * Verifica se o agendamento foi criado por esta máquina/sessão
+ */
+export function isSelfCreatedBooking(id: string): boolean {
+  if (!id) return false;
+  if (selfCreatedBookingIds.has(id)) return true;
+  try {
+    const raw = sessionStorage.getItem('gestlab_self_created_booking_ids');
+    if (raw) {
+      const list: string[] = JSON.parse(raw);
+      if (list.includes(id)) {
+        selfCreatedBookingIds.add(id);
+        return true;
+      }
+    }
+  } catch (e) {
+    // ignorar
+  }
+  return false;
+}
+
 // Helper para desduplicar agendamentos por id
 export function deduplicateBookings(list: Booking[]): Booking[] {
   if (!Array.isArray(list)) return [];
@@ -148,6 +191,7 @@ export async function clearAllBookings(): Promise<void> {
  */
 export async function createBooking(newBooking: Omit<Booking, 'id' | 'createdAt' | 'status' | 'whatsappSent'>): Promise<Booking> {
   const id = `res-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+  markBookingAsSelfCreated(id);
   const booking: Booking = {
     ...newBooking,
     id,
@@ -190,6 +234,7 @@ export async function createRecurringBookings(
   for (let i = 0; i < dates.length; i++) {
     const targetDate = dates[i];
     const id = `res-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 8)}`;
+    markBookingAsSelfCreated(id);
     const b: Booking = {
       ...baseBooking,
       id,
@@ -233,6 +278,7 @@ export async function createBatchBookings(
   const now = Date.now();
   const createdList: Booking[] = items.map((item, index) => {
     const id = item.id || `batch-${now}-${index}-${Math.random().toString(36).substring(2, 7)}`;
+    markBookingAsSelfCreated(id);
     const status = item.status || defaultStatus;
     return {
       ...item,

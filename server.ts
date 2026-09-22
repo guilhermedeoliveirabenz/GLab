@@ -42,6 +42,36 @@ async function startServer() {
   });
 
   // Helper para criar transporter do Nodemailer
+  let cachedFirestoreSmtp: any = null;
+
+  async function getStoredSmtpConfig() {
+    if (cachedFirestoreSmtp && cachedFirestoreSmtp.user && cachedFirestoreSmtp.pass) {
+      return cachedFirestoreSmtp;
+    }
+    try {
+      const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+      if (fs.existsSync(configPath)) {
+        const fbConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const { initializeApp, getApps, getApp } = await import('firebase/app');
+        const { initializeFirestore, doc, getDoc } = await import('firebase/firestore');
+
+        const app = getApps().length === 0 ? initializeApp(fbConfig) : getApp();
+        const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true }, fbConfig.firestoreDatabaseId);
+        const snap = await getDoc(doc(db, 'settings', 'email_settings'));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data?.smtp) {
+            cachedFirestoreSmtp = data.smtp;
+            return data.smtp;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao obter smtp de Firestore no backend:', err);
+    }
+    return cachedFirestoreSmtp;
+  }
+
   function createTransporter(config?: {
     host?: string;
     port?: number;
@@ -49,11 +79,16 @@ async function startServer() {
     user?: string;
     pass?: string;
   }) {
-    const host = config?.host || process.env.SMTP_HOST || 'smtp.gmail.com';
+    const host = (config?.host || process.env.SMTP_HOST || 'smtp.gmail.com').trim();
     const port = Number(config?.port || process.env.SMTP_PORT || 587);
     const secure = config?.secure !== undefined ? Boolean(config.secure) : (port === 465);
     const user = (config?.user !== undefined ? config.user : (process.env.SMTP_USER || '')).trim();
-    const pass = (config?.pass !== undefined ? config.pass : (process.env.SMTP_PASS || '')).trim();
+    let pass = (config?.pass !== undefined ? config.pass : (process.env.SMTP_PASS || '')).trim();
+
+    // Remove espaços que o Google insere em senhas de aplicativo ("abcd efgh ijkl mnop" -> "abcdefghijklmnop")
+    if ((host.includes('gmail') || user.includes('@gmail.com')) && pass) {
+      pass = pass.replace(/\s+/g, '');
+    }
 
     const hasAuth = Boolean(user && pass);
 
@@ -110,7 +145,16 @@ async function startServer() {
   // POST /api/test-smtp: Testa conexão com servidor SMTP/SNMP e envia e-mail de validação
   app.post('/api/test-smtp', async (req, res) => {
     try {
-      const { host, port, secure, user, pass, from, toEmail } = req.body || {};
+      let { host, port, secure, user, pass, from, toEmail } = req.body || {};
+
+      // Se usuário for informado mas senha vier vazia, tenta recuperar senha salva previamente
+      if (user && !pass) {
+        const stored = await getStoredSmtpConfig();
+        if (stored?.pass) {
+          pass = stored.pass;
+        }
+      }
+
       const { transporter, host: activeHost, port: activePort, user: activeUser, hasAuth } = createTransporter({
         host,
         port,
@@ -143,9 +187,13 @@ async function startServer() {
           });
         }
 
-        const fromAddress = from || process.env.SMTP_FROM || `"GestLab Notificações" <${activeUser || 'gestlab@escola.edu.br'}>`;
+        const isGmail = activeHost.includes('gmail') || activeUser.includes('@gmail.com');
+        const fromEmail = isGmail ? activeUser : (from || process.env.SMTP_FROM || activeUser || 'gestlab@escola.edu.br');
+        const fromAddress = `"GestLab Notificações" <${fromEmail}>`;
+
         sendResult = await transporter.sendMail({
           from: fromAddress,
+          replyTo: from || activeUser,
           to: toEmail,
           subject: '🔔 GestLab - Teste de Conexão SMTP / Notificações Concluído',
           text: `Teste de envio de e-mail via servidor SMTP realizado com sucesso!\n\nServidor: ${activeHost}:${activePort}\nData/Hora: ${new Date().toLocaleString('pt-BR')}\n\nO sistema GestLab agora está pronto para enviar notificações automáticas de agendamento.`,
@@ -181,6 +229,17 @@ async function startServer() {
             </div>
           `,
         });
+
+        if (hasAuth) {
+          cachedFirestoreSmtp = {
+            host: activeHost,
+            port: activePort,
+            secure: Boolean(secure),
+            user: activeUser,
+            pass,
+            enabled: true,
+          };
+        }
       }
 
       res.json({
@@ -206,7 +265,7 @@ async function startServer() {
   // POST /api/send-email: Envia e-mail de notificação de agendamento via SMTP
   app.post('/api/send-email', async (req, res) => {
     try {
-      const { to, subject, html, text, smtpConfig } = req.body || {};
+      let { to, subject, html, text, smtpConfig } = req.body || {};
 
       if (!to || (Array.isArray(to) && to.length === 0)) {
         return res.status(400).json({ success: false, error: 'Destinatário (to) é obrigatório.' });
@@ -222,22 +281,42 @@ async function startServer() {
         return res.status(400).json({ success: false, error: 'Nenhum e-mail de destinatário válido informado.' });
       }
 
-      // Se SMTP não estiver habilitado ou configurado com credenciais, retorna aviso informativo
-      if (smtpConfig && smtpConfig.enabled === false) {
-        return res.status(200).json({
+      // Se smtpConfig não foi fornecido ou não contém usuário e senha, recupera automaticamente do Firestore
+      if (!smtpConfig || !smtpConfig.user || !smtpConfig.pass) {
+        const stored = await getStoredSmtpConfig();
+        if (stored) {
+          smtpConfig = {
+            ...stored,
+            ...(smtpConfig || {}),
+            user: stored.user || smtpConfig?.user,
+            pass: stored.pass || smtpConfig?.pass,
+            enabled: true,
+          };
+        }
+      }
+
+      if (smtpConfig?.user && smtpConfig?.pass) {
+        cachedFirestoreSmtp = smtpConfig;
+      }
+
+      const { transporter, host: activeHost, user: activeUser, hasAuth } = createTransporter(smtpConfig);
+
+      if (!hasAuth) {
+        return res.status(400).json({
           success: false,
-          skipped: true,
-          error: 'Envio via SMTP desativado nas configurações do sistema.',
+          error: 'Credenciais de envio SMTP não configuradas. Acesse o Painel de Administração > Segurança para configurar.',
         });
       }
 
-      const { transporter, host: activeHost, user: activeUser } = createTransporter(smtpConfig);
       const fromName = smtpConfig?.fromName || process.env.SMTP_FROM_NAME || 'GestLab Notificações';
-      const fromEmail = smtpConfig?.fromEmail || smtpConfig?.user || process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || 'notificacoes@escola.edu.br';
+      const isGmail = activeHost.includes('gmail') || activeUser.includes('@gmail.com');
+      const fromEmail = isGmail ? activeUser : (smtpConfig?.fromEmail || activeUser || 'notificacoes@escola.edu.br');
+      const replyToEmail = smtpConfig?.fromEmail || activeUser;
       const fromAddress = `"${fromName}" <${fromEmail}>`;
 
       const info = await transporter.sendMail({
         from: fromAddress,
+        replyTo: replyToEmail,
         to: recipients.join(', '),
         subject,
         text: text || '',
