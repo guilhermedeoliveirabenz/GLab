@@ -7,6 +7,7 @@ import {
   clearAllLabsSoftwares,
   updateLabNotes,
   updateLabVisibilityForBooking,
+  updateLabBlockedStatus,
   POPULAR_SOFTWARES_LIST,
 } from '../lib/labService';
 import {
@@ -40,6 +41,8 @@ import {
   Building2,
   Eye,
   EyeOff,
+  Lock,
+  Ban,
 } from 'lucide-react';
 import { LabModal } from './LabModal';
 
@@ -119,6 +122,17 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
     return initial;
   });
 
+  const [blockedDraft, setBlockedDraft] = useState<Record<string, { isBlocked: boolean; reason: string }>>(() => {
+    const initial: Record<string, { isBlocked: boolean; reason: string }> = {};
+    labs.forEach((l) => {
+      initial[l.id] = {
+        isBlocked: Boolean(l.isBlocked),
+        reason: l.blockedReason || '',
+      };
+    });
+    return initial;
+  });
+
   // Sync when external labs change
   useEffect(() => {
     const today = getTodayDateString();
@@ -127,6 +141,19 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
       labs.forEach((l) => {
         if (updated[l.id] === undefined) {
           updated[l.id] = l.notes || '';
+        }
+      });
+      return updated;
+    });
+
+    setBlockedDraft((prev) => {
+      const updated = { ...prev };
+      labs.forEach((l) => {
+        if (updated[l.id] === undefined) {
+          updated[l.id] = {
+            isBlocked: Boolean(l.isBlocked),
+            reason: l.blockedReason || '',
+          };
         }
       });
       return updated;
@@ -181,6 +208,10 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
 
   const selectedLab = labs.find((l) => l.id === selectedLabId) || labs[0];
   const today = getTodayDateString();
+  const currentBlocked = blockedDraft[selectedLabId] || {
+    isBlocked: Boolean(selectedLab?.isBlocked),
+    reason: selectedLab?.blockedReason || '',
+  };
   const currentMaintenance: LabMaintenanceDraft = maintenanceDraft[selectedLabId] || {
     isUnderMaintenance: false,
     reason: '',
@@ -340,6 +371,41 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
     }
   };
 
+  // Quick toggle for lab blocking
+  const handleToggleBlock = async (isBlocked: boolean, specificReason?: string) => {
+    const reasonToUse = isBlocked
+      ? (specificReason !== undefined ? specificReason : (currentBlocked.reason || 'Bloqueado para agendamento'))
+      : '';
+    setBlockedDraft((prev) => ({
+      ...prev,
+      [selectedLabId]: {
+        isBlocked,
+        reason: reasonToUse,
+      },
+    }));
+    try {
+      await updateLabBlockedStatus(selectedLabId, isBlocked, reasonToUse);
+      setSuccessMsg(
+        isBlocked
+          ? `O ${selectedLab.name} foi BLOQUEADO para agendamento com sucesso!`
+          : `O ${selectedLab.name} foi DESBLOQUEADO e está liberado para agendamentos!`,
+      );
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (e) {
+      console.error('Erro ao atualizar bloqueio do laboratório:', e);
+    }
+  };
+
+  const handleBlockedReasonChange = (reason: string) => {
+    setBlockedDraft((prev) => ({
+      ...prev,
+      [selectedLabId]: {
+        isBlocked: (prev[selectedLabId] || currentBlocked).isBlocked,
+        reason,
+      },
+    }));
+  };
+
   // Save All for Selected Lab
   const handleSaveLabSettings = async (labId: string) => {
     setSavingLabId(labId);
@@ -350,8 +416,10 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
       const softs = softwaresDraft[labId] || [];
       const notes = notesDraft[labId] !== undefined ? notesDraft[labId] : (selectedLab.notes || '');
       const isVisible = visibleDraft[labId] !== undefined ? visibleDraft[labId] : (selectedLab.visibleForBooking !== false);
+      const blocked = blockedDraft[labId] || currentBlocked;
 
       await Promise.all([
+        updateLabBlockedStatus(labId, blocked.isBlocked, blocked.reason),
         updateLabMaintenanceStatus(
           labId,
           maint.isUnderMaintenance,
@@ -370,7 +438,7 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
         updateLabVisibilityForBooking(labId, isVisible),
       ]);
 
-      setSuccessMsg(`Configurações de agendamento, visibilidade e manutenção do ${selectedLab.name} salvas com sucesso!`);
+      setSuccessMsg(`Configurações de bloqueio, agendamento, visibilidade e manutenção do ${selectedLab.name} salvas com sucesso!`);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (e) {
       console.error('Erro ao salvar laboratório:', e);
@@ -478,11 +546,12 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
           className="w-full text-xs font-bold py-2.5 px-3 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 text-slate-900 min-h-[44px] cursor-pointer"
         >
           {labs.map((lab) => {
+            const isBlocked = blockedDraft[lab.id]?.isBlocked;
             const isMaint = maintenanceDraft[lab.id]?.isUnderMaintenance;
             const isHidden = (visibleDraft[lab.id] !== undefined ? visibleDraft[lab.id] : (lab.visibleForBooking !== false)) === false;
             return (
               <option key={lab.id} value={lab.id}>
-                {lab.name} ({lab.capacity} máqs){isMaint ? ' • [Manutenção]' : ''}{isHidden ? ' • [Oculto]' : ''}
+                {lab.name} ({lab.capacity} máqs){isBlocked ? ' • [🚫 BLOQUEADO]' : ''}{isMaint ? ' • [Manutenção]' : ''}{isHidden ? ' • [Oculto]' : ''}
               </option>
             );
           })}
@@ -511,6 +580,7 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
           <div className="bg-white rounded-2xl border border-slate-200 p-2 space-y-1 shadow-2xs max-h-[620px] overflow-y-auto">
             {labs.map((lab) => {
               const isSelected = lab.id === selectedLabId;
+              const isBlocked = blockedDraft[lab.id]?.isBlocked;
               const isMaint = maintenanceDraft[lab.id]?.isUnderMaintenance;
               const hasMsg = Boolean(broadcastDraft[lab.id]?.trim());
               const hasNotes = Boolean((notesDraft[lab.id] !== undefined ? notesDraft[lab.id] : lab.notes)?.trim());
@@ -533,14 +603,18 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                   <div className="flex items-center gap-2.5 truncate">
                     <div
                       className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                        isMaint
-                          ? 'bg-rose-100 text-rose-800'
-                          : lab.isMobile
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-blue-100 text-blue-800'
+                        isBlocked
+                          ? 'bg-red-600 text-white shadow-2xs'
+                          : isMaint
+                            ? 'bg-rose-100 text-rose-800'
+                            : lab.isMobile
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-blue-100 text-blue-800'
                       }`}
                     >
-                      {isMaint ? (
+                      {isBlocked ? (
+                        <Lock className="w-4 h-4 text-white" />
+                      ) : isMaint ? (
                         <Wrench className="w-4 h-4 text-rose-600" />
                       ) : lab.isMobile ? (
                         <Truck className="w-4 h-4" />
@@ -551,7 +625,13 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                     <div className="truncate">
                       <div className="text-xs font-semibold truncate leading-tight flex items-center gap-1.5">
                         <span>{lab.name}</span>
-                        {isMaint && (
+                        {isBlocked && (
+                          <span className="text-[9px] font-bold bg-red-600 text-white px-1.5 py-0.2 rounded-sm flex items-center gap-0.5 shadow-2xs">
+                            <Lock className="w-2.5 h-2.5" />
+                            <span>Bloqueado</span>
+                          </span>
+                        )}
+                        {isMaint && !isBlocked && (
                           <span className="text-[9px] font-bold bg-rose-600 text-white px-1.5 py-0.2 rounded-sm">
                             Manutenção
                           </span>
@@ -918,6 +998,114 @@ export const LabManagementPanel: React.FC<LabManagementPanelProps> = ({ labs }) 
                 <div className="flex items-center gap-2 text-xs text-slate-600 bg-white/70 px-3 py-1.5 rounded-lg border border-amber-200">
                   <Building2 className="w-3.5 h-3.5 text-amber-700" />
                   <span><strong>Localização física:</strong> {selectedLab.location}</span>
+                </div>
+              )}
+            </div>
+
+            {/* SEÇÃO NOVO: BLOQUEIO DO LABORATÓRIO PARA AGENDAMENTO */}
+            <div
+              className={`p-5 rounded-2xl border transition-all ${
+                currentBlocked.isBlocked
+                  ? 'bg-rose-50/90 border-rose-300 ring-2 ring-rose-300/60 shadow-xs'
+                  : 'bg-white border-slate-200'
+              }`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                      currentBlocked.isBlocked
+                        ? 'bg-red-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-500 border border-slate-200'
+                    }`}
+                  >
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <span>Bloqueio do Laboratório para Agendamento</span>
+                      {currentBlocked.isBlocked ? (
+                        <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-red-600 text-white shadow-2xs flex items-center gap-1">
+                          <span>🚫 BLOQUEADO</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                          <span>✅ LIBERADO</span>
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-xs text-slate-600 mt-1 max-w-xl leading-relaxed">
+                      {currentBlocked.isBlocked
+                        ? `O ${selectedLab.name} está BLOQUEADO para agendamentos. Professores verão o status "🚫 Bloqueado para Agendamento" e não poderão agendar horários nele.`
+                        : `Bloqueie este laboratório quando ele não puder receber agendamentos de professores (ex: avaliações institucionais, vestibular, eventos, reformas ou determinação da direção).`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="shrink-0 flex items-center gap-2">
+                  <button
+                    type="button"
+                    id={`toggle-lab-block-btn-${selectedLab.id}`}
+                    onClick={() => handleToggleBlock(!currentBlocked.isBlocked)}
+                    className={`px-4 py-2.5 text-xs font-bold rounded-xl border transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+                      currentBlocked.isBlocked
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
+                        : 'bg-red-600 hover:bg-red-700 text-white border-red-600'
+                    }`}
+                  >
+                    <Lock className="w-4 h-4" />
+                    <span>{currentBlocked.isBlocked ? 'Desbloquear Laboratório' : 'Bloquear este Laboratório'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Se estiver bloqueado, mostra o campo para motivo */}
+              {currentBlocked.isBlocked && (
+                <div className="mt-4 pt-4 border-t border-rose-200/80 space-y-3 animate-fade-in">
+                  <div>
+                    <label className="block text-xs font-bold text-rose-950 mb-1">
+                      Motivo do Bloqueio (visível aos professores ao tentar agendar):
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Ex: Interditado pela coordenação para avaliação institucional"
+                        value={currentBlocked.reason}
+                        onChange={(e) => handleBlockedReasonChange(e.target.value)}
+                        className="flex-1 px-3.5 py-2 text-xs bg-white border border-rose-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 font-medium text-slate-800"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleToggleBlock(true, currentBlocked.reason)}
+                        className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-2xs"
+                      >
+                        Salvar Motivo
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-slate-500 font-medium">Motivos rápidos:</span>
+                    {[
+                      'Interdição temporária pela coordenação',
+                      'Uso exclusivo para Provas / Avaliações',
+                      'Vestibular e Processo Seletivo',
+                      'Treinamento e Reunião de Docentes',
+                      'Reformulação técnica do espaço',
+                    ].map((sug) => (
+                      <button
+                        key={sug}
+                        type="button"
+                        onClick={() => {
+                          handleBlockedReasonChange(sug);
+                          handleToggleBlock(true, sug);
+                        }}
+                        className="text-[10px] px-2.5 py-1 bg-white text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer transition-colors font-medium shadow-2xs"
+                      >
+                        {sug}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

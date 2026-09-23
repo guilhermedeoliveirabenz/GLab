@@ -70,11 +70,54 @@ function playTone(
   gain.connect(ctx.destination);
 
   osc.start(startTime);
-  osc.stop(startTime + duration);
+  osc.stop(startTime + duration + 0.05);
 }
 
 /**
- * Notificação de Agendamento Realizado com Sucesso (Arpeggio melódico ascendente festivo)
+ * Toca uma nota de sino/carrilhão rica com harmônicos e decaimento acústico natural
+ */
+function playHarmonicBell(
+  ctx: AudioContext,
+  freq: number,
+  startTime: number,
+  duration: number = 1.8,
+  volume: number = 0.22,
+) {
+  // Harmônicos para simular sino tubular/carrilhão suave e acústico
+  const layers = [
+    { mult: 1.0, vol: volume, type: 'sine' as OscillatorType, durMult: 1.0 },
+    { mult: 2.0, vol: volume * 0.4, type: 'triangle' as OscillatorType, durMult: 0.8 },
+    { mult: 2.76, vol: volume * 0.18, type: 'sine' as OscillatorType, durMult: 0.65 },
+    { mult: 4.0, vol: volume * 0.08, type: 'sine' as OscillatorType, durMult: 0.5 },
+  ];
+
+  layers.forEach(({ mult, vol, type, durMult }) => {
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq * mult, startTime);
+
+      const noteDuration = duration * durMult;
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(Math.max(vol, 0.0001), startTime + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + noteDuration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(startTime);
+      osc.stop(startTime + noteDuration + 0.05);
+    } catch {
+      // Safe context
+    }
+  });
+}
+
+/**
+ * Notificação de Agendamento Realizado com Sucesso (~3 segundos de duração)
+ * Arpeggio festivo ascendente em C maior com cauda harmônica ressonante
  */
 export function playBookingSuccessSound(): void {
   if (!isSoundEnabled()) return;
@@ -83,19 +126,23 @@ export function playBookingSuccessSound(): void {
 
   try {
     const now = ctx.currentTime;
-    // Acorde C maior brilhante: C5 (523.25), E5 (659.25), G5 (783.99), C6 (1046.5)
-    playTone(ctx, 523.25, now + 0.00, 0.25, 'triangle', 0.25);
-    playTone(ctx, 659.25, now + 0.08, 0.25, 'triangle', 0.25);
-    playTone(ctx, 783.99, now + 0.16, 0.30, 'triangle', 0.25);
-    playTone(ctx, 1046.5, now + 0.24, 0.55, 'sine', 0.30);
+    // Sequência melódica estendida para durar ~3.0 segundos
+    playHarmonicBell(ctx, 523.25, now + 0.00, 1.4, 0.22); // C5
+    playHarmonicBell(ctx, 659.25, now + 0.25, 1.4, 0.22); // E5
+    playHarmonicBell(ctx, 783.99, now + 0.50, 1.5, 0.24); // G5
+    playHarmonicBell(ctx, 1046.50, now + 0.80, 1.6, 0.26); // C6
+    playHarmonicBell(ctx, 1318.51, now + 1.15, 1.8, 0.24); // E6
+    // Acorde final harmônico que reverbera suavemente até 3.05s
+    playHarmonicBell(ctx, 1046.50, now + 1.50, 1.55, 0.22); // C6
+    playHarmonicBell(ctx, 1567.98, now + 1.50, 1.55, 0.20); // G6
   } catch (e) {
     console.warn('Erro ao reproduzir som de agendamento:', e);
   }
 }
 
 /**
- * Notificação de Novo Agendamento Recebido (para técnicos e administradores)
- * Som de campainha de notificação suave (duplo chime)
+ * Notificação de Novo Agendamento Recebido (~3 segundos de duração)
+ * Carrilhão de 5 notas melódicas harmônicas com sustentação aveludada
  */
 export function playNewBookingAlertSound(): void {
   if (!isSoundEnabled()) return;
@@ -104,15 +151,19 @@ export function playNewBookingAlertSound(): void {
 
   try {
     const now = ctx.currentTime;
-    playTone(ctx, 587.33, now + 0.00, 0.20, 'sine', 0.25); // D5
-    playTone(ctx, 880.00, now + 0.12, 0.40, 'sine', 0.30); // A5
+    // Frase melódica em F# menor pentatônica / D maior estendida para exatamente 3.0 segundos
+    playHarmonicBell(ctx, 587.33, now + 0.00, 1.4, 0.25); // D5
+    playHarmonicBell(ctx, 739.99, now + 0.35, 1.4, 0.26); // F#5
+    playHarmonicBell(ctx, 880.00, now + 0.70, 1.5, 0.28); // A5
+    playHarmonicBell(ctx, 1174.66, now + 1.10, 1.7, 0.30); // D6
+    playHarmonicBell(ctx, 1479.98, now + 1.50, 1.55, 0.25); // F#6 (termina em ~3.05s)
   } catch (e) {
     console.warn('Erro ao reproduzir alerta de novo agendamento:', e);
   }
 }
 
 /**
- * Notificação de Agendamento Aprovado / Confirmado
+ * Notificação de Agendamento Aprovado / Confirmado (~2.8s)
  */
 export function playBookingConfirmedSound(): void {
   if (!isSoundEnabled()) return;
@@ -121,32 +172,26 @@ export function playBookingConfirmedSound(): void {
 
   try {
     const now = ctx.currentTime;
-    playTone(ctx, 659.25, now + 0.00, 0.18, 'triangle', 0.25); // E5
-    playTone(ctx, 1046.50, now + 0.12, 0.40, 'sine', 0.30);  // C6
+    playHarmonicBell(ctx, 659.25, now + 0.00, 1.3, 0.25);  // E5
+    playHarmonicBell(ctx, 830.61, now + 0.30, 1.4, 0.26);  // G#5
+    playHarmonicBell(ctx, 1046.50, now + 0.65, 1.6, 0.28); // C6
+    playHarmonicBell(ctx, 1318.51, now + 1.05, 1.8, 0.30); // E6 (termina em ~2.85s)
   } catch (e) {
     console.warn('Erro ao reproduzir som de confirmação:', e);
   }
 }
 
 /**
- * Notificação de Ping simples (teste ou clique de ação)
+ * Notificação de Ping simples / Demonstração (~3 segundos de duração)
  */
 export function playNotificationPingSound(): void {
-  if (!isSoundEnabled()) return;
-  const ctx = getAudioContext();
-  if (!ctx) return;
-
-  try {
-    const now = ctx.currentTime;
-    playTone(ctx, 880.00, now, 0.25, 'sine', 0.25);
-  } catch (e) {
-    console.warn('Erro ao reproduzir ping:', e);
-  }
+  // Reproduz o carrilhão de 3 segundos para teste imediato
+  playPendingAlertSound();
 }
 
 /**
- * Notificação de Alerta Pré-Agendamento (20 minutos antes do início da aula)
- * Chime suave triplo harmônico de alta visibilidade
+ * Notificação de Alerta Pré-Agendamento (~3 segundos de duração)
+ * 3 pares de sinos suaves com reverberação espaçada para alertar 20 min antes
  */
 export function playUpcomingBooking20MinReminderSound(): void {
   if (!isSoundEnabled()) return;
@@ -155,16 +200,23 @@ export function playUpcomingBooking20MinReminderSound(): void {
 
   try {
     const now = ctx.currentTime;
-    playTone(ctx, 554.37, now + 0.00, 0.22, 'triangle', 0.28); // C#5
-    playTone(ctx, 659.25, now + 0.12, 0.22, 'triangle', 0.28); // E5
-    playTone(ctx, 880.00, now + 0.24, 0.45, 'sine', 0.32);     // A5
+    // Par 1
+    playHarmonicBell(ctx, 554.37, now + 0.00, 1.2, 0.25); // C#5
+    playHarmonicBell(ctx, 659.25, now + 0.18, 1.2, 0.25); // E5
+    // Par 2
+    playHarmonicBell(ctx, 739.99, now + 0.85, 1.3, 0.26); // F#5
+    playHarmonicBell(ctx, 880.00, now + 1.03, 1.3, 0.28); // A5
+    // Par 3 com sustentação suave até ~3.05 segundos
+    playHarmonicBell(ctx, 1108.73, now + 1.70, 1.35, 0.30); // C#6
+    playHarmonicBell(ctx, 1318.51, now + 1.85, 1.20, 0.28); // E6
   } catch (e) {
     console.warn('Erro ao reproduzir alerta de 20 minutos:', e);
   }
 }
 
 /**
- * Notificação de Agendamento Pendente (para técnicos e administradores)
+ * Notificação de Agendamento Pendente / Pop-up Alerta (~3 segundos de duração)
+ * Carrilhão de 5 fases harmoniosas que chamam a atenção por ~3 segundos sem ruído estridente
  */
 export function playPendingAlertSound(): void {
   if (!isSoundEnabled()) return;
@@ -173,8 +225,17 @@ export function playPendingAlertSound(): void {
 
   try {
     const now = ctx.currentTime;
-    playTone(ctx, 493.88, now + 0.00, 0.18, 'sine', 0.25); // B4
-    playTone(ctx, 739.99, now + 0.10, 0.35, 'sine', 0.30); // F#5
+    // 1º sino (grave e aveludado)
+    playHarmonicBell(ctx, 523.25, now + 0.00, 1.4, 0.25); // C5
+    // 2º sino (brilho intermediário)
+    playHarmonicBell(ctx, 659.25, now + 0.35, 1.4, 0.27); // E5
+    // 3º sino (presença)
+    playHarmonicBell(ctx, 783.99, now + 0.70, 1.5, 0.28); // G5
+    // 4º sino (destaque agudo)
+    playHarmonicBell(ctx, 1046.50, now + 1.10, 1.7, 0.30); // C6
+    // 5º sino final harmonizado com sustain de 1.5s (duração total: 1.55s + 1.5s = 3.05s)
+    playHarmonicBell(ctx, 1318.51, now + 1.55, 1.50, 0.26); // E6
+    playHarmonicBell(ctx, 783.99, now + 1.55, 1.50, 0.18);  // G5 (fundo harmônico)
   } catch (e) {
     console.warn('Erro ao reproduzir som de pendência:', e);
   }

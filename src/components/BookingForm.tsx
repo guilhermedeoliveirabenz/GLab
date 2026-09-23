@@ -41,6 +41,7 @@ import {
   Check,
   X,
   EyeOff,
+  Lock,
   Mail,
   Send,
   Copy,
@@ -380,6 +381,15 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   };
 
   const executeRecurringBooking = async () => {
+    // Validação de bloqueio do laboratório para agendamento
+    if (selectedLab.isBlocked && !isAdmin) {
+      setConflictError(
+        `O ${selectedLab.name} está bloqueado para agendamentos (${selectedLab.blockedReason || 'Interdição temporária pela administração'}). Por favor, selecione outro laboratório.`,
+      );
+      setShowRecurrenceModal(false);
+      return;
+    }
+
     const { dates, conflictsFound, formattedTimeSlot } = prepareRecurrenceDates();
 
     if (conflictsFound.length > 0) {
@@ -449,6 +459,14 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         setConflictError(leadTimeCheck.errorReason);
         return;
       }
+    }
+
+    // Validação de bloqueio do laboratório para agendamento
+    if (selectedLab.isBlocked && !isAdmin) {
+      setConflictError(
+        `O ${selectedLab.name} está bloqueado para agendamentos (${selectedLab.blockedReason || 'Interdição temporária pela administração'}). Por favor, selecione outro laboratório.`,
+      );
+      return;
     }
 
     // Validação de bloqueio por manutenção
@@ -1052,6 +1070,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
               {availableLabs.map((lab) => {
                 const isSelected = lab.id === labId;
+                const isLabBlocked = Boolean(lab.isBlocked);
                 const labMaintStatus = getLabMaintenanceStatus(lab, date, startTime, endTime);
                 const isMaintActive = labMaintStatus.isUnderMaintenance;
                 const isMaintFuture = !isMaintActive && labMaintStatus.isScheduledFuture;
@@ -1065,26 +1084,37 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     onClick={() => handleLabChange(lab.id)}
                     className={`p-3 rounded-xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
                       isSelected
-                        ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-600/20 shadow-xs'
-                        : isMaintActive
-                          ? 'border-rose-300 bg-rose-50/50 hover:bg-rose-50/80'
-                          : isMaintFuture
-                            ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50/70'
-                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        ? isLabBlocked
+                          ? 'border-red-600 bg-red-50 ring-2 ring-red-600/30 shadow-xs'
+                          : 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-600/20 shadow-xs'
+                        : isLabBlocked
+                          ? 'border-red-300 bg-red-50/50 hover:bg-red-50/80'
+                          : isMaintActive
+                            ? 'border-rose-300 bg-rose-50/50 hover:bg-rose-50/80'
+                            : isMaintFuture
+                              ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50/70'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                     }`}
                     title={
-                      isMaintActive
-                        ? `Fechado para manutenção (${labMaintStatus.formattedPeriod})`
-                        : isMaintFuture
-                          ? `Manutenção programada para ${labMaintStatus.formattedPeriod}`
-                          : isHiddenFromTeachers
-                            ? 'Este laboratório está oculto para agendamento pelos professores'
-                            : undefined
+                      isLabBlocked
+                        ? `🚫 BLOQUEADO: ${lab.blockedReason || 'Bloqueado temporariamente para agendamentos'}`
+                        : isMaintActive
+                          ? `Fechado para manutenção (${labMaintStatus.formattedPeriod})`
+                          : isMaintFuture
+                            ? `Manutenção programada para ${labMaintStatus.formattedPeriod}`
+                            : isHiddenFromTeachers
+                              ? 'Este laboratório está oculto para agendamento pelos professores'
+                              : undefined
                     }
                   >
                     <div className="flex items-center justify-between gap-1 mb-1">
                       <span className="font-bold text-xs text-slate-900 truncate">{lab.name}</span>
-                      {isMaintActive ? (
+                      {isLabBlocked ? (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-red-600 text-white shrink-0 flex items-center gap-0.5 shadow-2xs">
+                          <Lock className="w-2.5 h-2.5" />
+                          <span>Bloqueado</span>
+                        </span>
+                      ) : isMaintActive ? (
                         <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-rose-600 text-white shrink-0">
                           Manutenção
                         </span>
@@ -1117,6 +1147,29 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* ALERTA DE LABORATÓRIO BLOQUEADO */}
+          {selectedLab.isBlocked && (
+            <div className="mt-3 p-4 bg-red-50 border-2 border-red-300 rounded-xl text-red-950 flex items-start gap-3 animate-fade-in shadow-2xs">
+              <Lock className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h4 className="text-sm font-bold text-red-900 flex items-center gap-1.5">
+                    <span>🚫 {selectedLab.name.toUpperCase()} ESTÁ BLOQUEADO PARA AGENDAMENTO</span>
+                  </h4>
+                  <span className="text-[10px] font-bold px-2 py-0.5 bg-red-600 text-white rounded-full">
+                    Agendamentos Suspensos
+                  </span>
+                </div>
+                <p className="text-xs text-red-800 mt-1 leading-relaxed">
+                  <strong>Motivo:</strong> {selectedLab.blockedReason || 'Bloqueado temporariamente pela coordenação / administração escolar.'}
+                </p>
+                <p className="text-[11px] text-red-700 mt-1">
+                  Não é possível confirmar novos agendamentos para este laboratório enquanto estiver bloqueado. Por gentileza, selecione outro laboratório acima para prosseguir.
+                </p>
+              </div>
             </div>
           )}
 
@@ -1727,22 +1780,32 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           <button
             id="submit-booking-btn"
             type="submit"
-            disabled={submitting || isLabUnderMaintenance}
+            disabled={submitting || isLabUnderMaintenance || (selectedLab.isBlocked && !isAdmin)}
             className={`w-full py-3.5 px-6 text-sm font-bold text-white rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
-              isLabUnderMaintenance
-                ? 'bg-slate-400 cursor-not-allowed opacity-60'
-                : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
+              selectedLab.isBlocked && !isAdmin
+                ? 'bg-red-600 cursor-not-allowed opacity-80'
+                : isLabUnderMaintenance
+                  ? 'bg-slate-400 cursor-not-allowed opacity-60'
+                  : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
             }`}
           >
-            {isRecurring ? <Repeat className="w-4 h-4" /> : <Calendar className="w-4 h-4" />}
+            {selectedLab.isBlocked && !isAdmin ? (
+              <Lock className="w-4 h-4" />
+            ) : isRecurring ? (
+              <Repeat className="w-4 h-4" />
+            ) : (
+              <Calendar className="w-4 h-4" />
+            )}
             <span>
               {submitting
                 ? 'Processando Agendamento...'
-                : isLabUnderMaintenance
-                  ? 'Laboratório em Manutenção (Indisponível)'
-                  : isRecurring
-                    ? `Confirmar Agendamento Recorrente (${recurrenceCount} aulas)`
-                    : 'Confirmar e Solicitar Agendamento'}
+                : selectedLab.isBlocked && !isAdmin
+                  ? 'Laboratório Bloqueado para Agendamento'
+                  : isLabUnderMaintenance
+                    ? 'Laboratório em Manutenção (Indisponível)'
+                    : isRecurring
+                      ? `Confirmar Agendamento Recorrente (${recurrenceCount} aulas)`
+                      : 'Confirmar e Solicitar Agendamento'}
             </span>
           </button>
           <p className="text-center text-[11px] text-slate-600 mt-2">

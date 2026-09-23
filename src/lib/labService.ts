@@ -92,6 +92,8 @@ function getLocalLabs(): Lab[] {
     maintenanceEndTime: undefined,
     maintenanceAllDay: true,
     broadcastMessage: '',
+    isBlocked: false,
+    blockedReason: '',
     active: true,
   }));
 }
@@ -154,6 +156,8 @@ export function subscribeToLabs(callback: (labs: Lab[]) => void): () => void {
           maintenanceEndTime: custom?.maintenanceEndTime,
           maintenanceAllDay: custom?.maintenanceAllDay !== undefined ? custom.maintenanceAllDay : true,
           broadcastMessage: custom?.broadcastMessage || '',
+          isBlocked: Boolean(custom?.isBlocked),
+          blockedReason: custom?.blockedReason || '',
           customAdded: false,
           active: custom?.active !== false,
           visibleForBooking: custom?.visibleForBooking !== undefined ? custom.visibleForBooking : (baseLab.visibleForBooking !== false),
@@ -190,6 +194,8 @@ export function subscribeToLabs(callback: (labs: Lab[]) => void): () => void {
             maintenanceEndTime: custom.maintenanceEndTime,
             maintenanceAllDay: custom.maintenanceAllDay !== undefined ? custom.maintenanceAllDay : true,
             broadcastMessage: custom.broadcastMessage || '',
+            isBlocked: Boolean(custom.isBlocked),
+            blockedReason: custom.blockedReason || '',
             customAdded: true,
             active: true,
             visibleForBooking: custom.visibleForBooking !== undefined ? custom.visibleForBooking : true,
@@ -227,6 +233,8 @@ export async function saveLab(
     location?: string;
     softwares?: string[];
     visibleForBooking?: boolean;
+    isBlocked?: boolean;
+    blockedReason?: string;
   }
 ): Promise<Lab> {
   const isMobile = labData.isMobile !== undefined ? labData.isMobile : (labData.type === 'mobile');
@@ -249,6 +257,8 @@ export async function saveLab(
     isUnderMaintenance: false,
     maintenanceReason: '',
     broadcastMessage: '',
+    isBlocked: Boolean(labData.isBlocked),
+    blockedReason: labData.blockedReason?.trim() || '',
     customAdded: !LAB_LIST.some((l) => l.id === labId),
     active: true,
     visibleForBooking: labData.visibleForBooking !== undefined ? labData.visibleForBooking : true,
@@ -285,6 +295,8 @@ export async function saveLab(
           badgeColor: newLab.badgeColor,
           customAdded: newLab.customAdded,
           visibleForBooking: newLab.visibleForBooking,
+          isBlocked: newLab.isBlocked,
+          blockedReason: newLab.blockedReason,
           active: true,
           updatedAt: Date.now(),
         },
@@ -296,6 +308,50 @@ export async function saveLab(
   }
 
   return newLab;
+}
+
+/**
+ * Bloqueia ou desbloqueia um laboratório para novos agendamentos
+ */
+export async function updateLabBlockedStatus(
+  labId: string,
+  isBlocked: boolean,
+  blockedReason?: string,
+): Promise<void> {
+  const currentLabs = getLocalLabs();
+  const updatedLabs = currentLabs.map((l) =>
+    l.id === labId
+      ? {
+          ...l,
+          isBlocked,
+          blockedReason: isBlocked
+            ? (blockedReason !== undefined ? blockedReason.trim() : (l.blockedReason || 'Bloqueado para agendamento'))
+            : '',
+          updatedAt: Date.now(),
+        }
+      : l,
+  );
+  setLocalLabs(updatedLabs);
+
+  if (db) {
+    try {
+      const docRef = doc(db, LABS_CONFIG_COLLECTION, labId);
+      await setDoc(
+        docRef,
+        {
+          labId,
+          isBlocked,
+          blockedReason: isBlocked
+            ? (blockedReason !== undefined ? blockedReason.trim() : 'Bloqueado para agendamento')
+            : '',
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.error('Erro ao atualizar status de bloqueio do laboratório no Firestore:', err);
+    }
+  }
 }
 
 /**

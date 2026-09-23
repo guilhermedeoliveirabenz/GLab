@@ -48,6 +48,7 @@ import {
   ChevronUp,
   Eye,
   ArrowLeftRight,
+  Lock,
 } from 'lucide-react';
 
 export interface AcademicPeriod {
@@ -653,7 +654,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
               <option value="all">Todos os Laboratórios ({availableLabs.length})</option>
               {availableLabs.map((lab) => (
                 <option key={lab.id} value={lab.id}>
-                  {lab.name} {isAdmin && lab.visibleForBooking === false ? ' (Oculto)' : ''}
+                  {lab.name} {lab.isBlocked ? '🚫 [BLOQUEADO]' : ''} {isAdmin && lab.visibleForBooking === false ? ' (Oculto)' : ''}
                 </option>
               ))}
             </select>
@@ -757,6 +758,37 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
           <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
             <span className="text-[11px] bg-amber-200/80 text-amber-950 px-2.5 py-1 rounded-lg font-bold border border-amber-300">
               Bloqueado nos horários definidos
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Banner de Laboratórios Bloqueados */}
+      {availableLabs.some((l) => l.isBlocked) && (
+        <div className="bg-red-50/95 border border-red-300 rounded-2xl p-3 sm:p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-red-950 shadow-2xs">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-red-100 border border-red-300 flex items-center justify-center text-red-700 shrink-0 mt-0.5 sm:mt-0">
+              <Lock className="w-4 h-4 text-red-600" />
+            </div>
+            <div>
+              <span className="font-bold block sm:inline text-red-950">
+                Laboratório(s) Bloqueado(s) para Agendamento:
+              </span>
+              <div className="text-[11px] text-red-800 mt-0.5 space-y-0.5">
+                {availableLabs
+                  .filter((l) => l.isBlocked)
+                  .map((l) => (
+                    <div key={l.id} className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-red-950">{l.name}:</span>
+                      <span>{l.blockedReason || 'Bloqueado temporariamente pela coordenação'}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+            <span className="text-[11px] bg-red-200/90 text-red-950 px-2.5 py-1 rounded-lg font-bold border border-red-300">
+              🚫 Agendamentos Suspensos
             </span>
           </div>
         </div>

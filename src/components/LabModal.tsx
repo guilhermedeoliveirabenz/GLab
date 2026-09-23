@@ -16,6 +16,8 @@ import {
   Sparkles,
   Eye,
   EyeOff,
+  Lock,
+  Ban,
 } from 'lucide-react';
 
 interface LabModalProps {
@@ -43,6 +45,8 @@ export const LabModal: React.FC<LabModalProps> = ({
   const [location, setLocation] = useState('');
   const [badgeColor, setBadgeColor] = useState(LAB_BADGE_COLORS[0].value);
   const [visibleForBooking, setVisibleForBooking] = useState(true);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blockedReason, setBlockedReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -57,6 +61,8 @@ export const LabModal: React.FC<LabModalProps> = ({
       setLocation(labToEdit.location || '');
       setBadgeColor(labToEdit.badgeColor || LAB_BADGE_COLORS[0].value);
       setVisibleForBooking(labToEdit.visibleForBooking !== false);
+      setIsBlocked(Boolean(labToEdit.isBlocked));
+      setBlockedReason(labToEdit.blockedReason || '');
     } else {
       setName('');
       setCapacity(35);
@@ -66,6 +72,8 @@ export const LabModal: React.FC<LabModalProps> = ({
       setLocation('');
       setBadgeColor(LAB_BADGE_COLORS[0].value);
       setVisibleForBooking(true);
+      setIsBlocked(false);
+      setBlockedReason('');
     }
     setErrorMsg(null);
     setIsDeleting(false);
@@ -103,6 +111,8 @@ export const LabModal: React.FC<LabModalProps> = ({
         badgeColor,
         softwares: labToEdit?.softwares || [],
         visibleForBooking,
+        isBlocked,
+        blockedReason: isBlocked ? (blockedReason.trim() || 'Bloqueado para agendamento') : '',
       });
 
       if (onSaved) {
@@ -356,6 +366,99 @@ export const LabModal: React.FC<LabModalProps> = ({
                 <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
               </label>
             </div>
+          </div>
+
+          {/* Bloqueio do Laboratório para Agendamento */}
+          <div
+            className={`p-4 rounded-xl border transition-all ${
+              isBlocked
+                ? 'bg-rose-50/80 border-rose-300 ring-1 ring-rose-200 shadow-2xs'
+                : 'bg-slate-50/80 border-slate-200'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div
+                  className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                    isBlocked
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-slate-200 text-slate-500'
+                  }`}
+                >
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <label
+                      htmlFor="lab-blocked-for-booking-checkbox"
+                      className="text-xs font-bold text-slate-900 cursor-pointer"
+                    >
+                      Bloquear Laboratório para Agendamento
+                    </label>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        isBlocked
+                          ? 'bg-rose-600 text-white shadow-2xs'
+                          : 'bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {isBlocked ? '🚫 Bloqueado' : '✅ Liberado'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-1">
+                    {isBlocked
+                      ? 'O laboratório continuará visível mas aparecerá com o selo "🚫 Bloqueado para Agendamento" e novos agendamentos ficarão bloqueados para professores.'
+                      : 'O laboratório está liberado para receber agendamentos normalmente conforme as regras escolares.'}
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                <input
+                  id="lab-blocked-for-booking-checkbox"
+                  type="checkbox"
+                  checked={isBlocked}
+                  onChange={(e) => setIsBlocked(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-600"></div>
+              </label>
+            </div>
+
+            {/* Motivo do Bloqueio (visível se estiver bloqueado) */}
+            {isBlocked && (
+              <div className="mt-3 pt-3 border-t border-rose-200 space-y-2 animate-fade-in">
+                <label className="block text-[11px] font-bold text-rose-950">
+                  Motivo do Bloqueio (exibido na tela para os professores):
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Interditado pela coordenação, Uso exclusivo para Prova Institucional, etc."
+                  value={blockedReason}
+                  onChange={(e) => setBlockedReason(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-white border border-rose-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 font-medium text-slate-800"
+                />
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-500">Sugestões:</span>
+                  {[
+                    'Interdição temporária',
+                    'Uso institucional / Direção',
+                    'Avaliação institucional / Provas',
+                    'Treinamento de professores',
+                    'Reestruturação das bancadas',
+                  ].map((sug) => (
+                    <button
+                      key={sug}
+                      type="button"
+                      onClick={() => setBlockedReason(sug)}
+                      className="text-[10px] px-2 py-0.5 bg-white text-rose-700 hover:bg-rose-100/70 border border-rose-200 rounded-md cursor-pointer transition-colors"
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Descrição e Localização */}

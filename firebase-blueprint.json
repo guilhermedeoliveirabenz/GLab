@@ -46,6 +46,8 @@
         "maintenanceEndTime": { "type": "string" },
         "maintenanceAllDay": { "type": "boolean" },
         "broadcastMessage": { "type": "string" },
+        "isBlocked": { "type": "boolean" },
+        "blockedReason": { "type": "string" },
         "updatedAt": { "type": "number" }
       },
       "required": ["labId"]

@@ -23,6 +23,8 @@ export interface Lab {
   maintenanceEndTime?: string; // Horário de término (HH:mm, ex: "12:00")
   maintenanceAllDay?: boolean; // Se a interdição vale para o dia todo
   broadcastMessage?: string; // Mensagem/aviso para o usuário no momento do agendamento
+  isBlocked?: boolean; // Se o laboratório está bloqueado para agendamento
+  blockedReason?: string; // Motivo do bloqueio (ex: "Uso interno", "Avaliação institucional", "Interdição temporária")
 }
 
 export type EducationLevel = 'basico' | 'superior' | 'ead' | 'outros';

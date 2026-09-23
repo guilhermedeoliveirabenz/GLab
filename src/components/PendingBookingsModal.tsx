@@ -12,7 +12,9 @@ import {
   AlertTriangle,
   ChevronRight,
   ChevronLeft,
+  Volume2,
 } from 'lucide-react';
+import { playPendingAlertSound } from '../lib/soundUtils';
 
 interface PendingBookingsModalProps {
   pendingBookings: Booking[];
@@ -27,8 +29,17 @@ export const PendingBookingsModal: React.FC<PendingBookingsModalProps> = ({
   onReviewInAdmin,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlayingSound, setIsPlayingSound] = useState(false);
 
   if (pendingBookings.length === 0) return null;
+
+  const handleReplaySound = () => {
+    setIsPlayingSound(true);
+    playPendingAlertSound();
+    setTimeout(() => {
+      setIsPlayingSound(false);
+    }, 3100);
+  };
 
   const activeIndex = Math.min(currentIndex, pendingBookings.length - 1);
   const currentBooking = pendingBookings[activeIndex] || pendingBookings[0];
@@ -66,14 +77,27 @@ export const PendingBookingsModal: React.FC<PendingBookingsModalProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            title="Fechar Notificação"
-            className="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/15 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleReplaySound}
+              title="Ouvir som da notificação (3 segundos)"
+              className={`text-white/90 hover:text-white p-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
+                isPlayingSound ? 'bg-white/30 ring-2 ring-white/60 animate-pulse' : 'bg-white/15 hover:bg-white/25'
+              }`}
+            >
+              <Volume2 className={`w-4 h-4 ${isPlayingSound ? 'animate-bounce' : ''}`} />
+              <span className="hidden sm:inline">{isPlayingSound ? 'Ouvindo (3s)...' : 'Som (3s)'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              title="Fechar Notificação"
+              className="text-white/80 hover:text-white p-2 rounded-xl hover:bg-white/15 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Paginação se houver mais de uma pendência */}
