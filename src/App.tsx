@@ -15,6 +15,7 @@ import { BatchImportModal } from './components/BatchImportModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { Upcoming20MinAlertModal } from './components/Upcoming20MinAlertModal';
 import { PendingBookingsNotification } from './components/PendingBookingsNotification';
+import { PendingBookingsModal } from './components/PendingBookingsModal';
 import {
   findUpcoming20MinAlerts,
   UpcomingAlertItem,
@@ -56,6 +57,7 @@ function AppContent() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
   const [latestNewBookingAlert, setLatestNewBookingAlert] = useState<Booking | null>(null);
+  const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
 
   // Alertas preventivos de 20 minutos
   const [upcoming20MinAlerts, setUpcoming20MinAlerts] = useState<UpcomingAlertItem[]>([]);
@@ -70,11 +72,14 @@ function AppContent() {
   const pendingBookings = useMemo(() => bookings.filter((b) => b.status === 'pending'), [bookings]);
   const pendingCount = pendingBookings.length;
 
-  // Notificação sonora e de boas-vindas para Administrador ou Técnico conectado com pendências
+  // Notificação sonora, pop-up e boas-vindas para Administrador ou Técnico conectado com pendências
   useEffect(() => {
     if (isAdmin && pendingCount > 0 && !hasNotifiedPendingLoginRef.current) {
       hasNotifiedPendingLoginRef.current = true;
       playPendingAlertSound();
+      // Pula pop-up com as solicitações pendentes para revisão rápida do admin/técnico
+      setIsPendingModalOpen(true);
+
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
         try {
           new Notification('🔔 GestLab: Agendamentos Pendentes', {
@@ -194,6 +199,9 @@ function AppContent() {
           playNewBookingAlertSound();
           setLatestNewBookingAlert(newest);
 
+          // Pula pop-up modal imediatamente na tela para notificar o usuário conectado
+          setIsPendingModalOpen(true);
+
           // Disparo de notificação nativa do sistema/navegador se autorizada
           if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
             try {
@@ -291,6 +299,7 @@ function AppContent() {
         pendingBookings={pendingBookings}
         upcomingAlerts={upcoming20MinAlerts}
         onOpenUpcomingAlert={(alert) => setModalAlertQueue([alert])}
+        onOpenPendingPopUp={() => setIsPendingModalOpen(true)}
       />
 
       {/* Indicador de Status Offline/Online PWA */}
@@ -307,9 +316,14 @@ function AppContent() {
                   Modo {user?.role === 'technician' ? 'Técnico de TI' : 'Administrador'} Ativo
                 </span>
                 {pendingCount > 0 && (
-                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-full border border-red-200 animate-pulse">
-                    ● {pendingCount} {pendingCount === 1 ? 'pendência' : 'pendências'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsPendingModalOpen(true)}
+                    className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-red-700 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded-full border border-red-200 animate-pulse cursor-pointer transition-colors"
+                    title="Clique para abrir o pop-up de notificações pendentes"
+                  >
+                    ● {pendingCount} {pendingCount === 1 ? 'pendência' : 'pendências'} (Ver Pop-up)
+                  </button>
                 )}
               </div>
             )}
@@ -370,6 +384,7 @@ function AppContent() {
               setActiveTab('admin');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
+            onOpenPopUp={() => setIsPendingModalOpen(true)}
           />
         )}
 
@@ -502,10 +517,10 @@ function AppContent() {
       {latestNewBookingAlert && !isSelfCreatedBooking(latestNewBookingAlert.id) && (
         <div
           id="realtime-new-booking-toast"
-          className="fixed bottom-5 right-5 z-50 max-w-sm w-full bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 animate-slide-up flex items-start gap-3"
+          className="fixed bottom-5 right-5 z-50 max-w-sm w-full bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border-2 border-amber-400 animate-toast-slide-in flex items-start gap-3"
         >
           <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-            <Bell className="w-5 h-5 animate-pulse" />
+            <Bell className="w-5 h-5 animate-swing" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
@@ -525,17 +540,42 @@ function AppContent() {
             <p className="text-[11px] text-slate-400 mt-0.5">
               📅 {latestNewBookingAlert.date} • ⏰ {latestNewBookingAlert.timeSlot} (Turma: {latestNewBookingAlert.classGroup})
             </p>
-            <div className="mt-2.5 flex items-center justify-end">
+            <div className="mt-2.5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setLatestNewBookingAlert(null)}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg transition-colors cursor-pointer"
               >
                 Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLatestNewBookingAlert(null);
+                  setIsPendingModalOpen(true);
+                }}
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+              >
+                <span>Ver Pop-up</span>
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Pop-up Modal de Notificação de Agendamentos Pendentes */}
+      {isPendingModalOpen && pendingBookings.length > 0 && (
+        <PendingBookingsModal
+          pendingBookings={pendingBookings}
+          onClose={() => setIsPendingModalOpen(false)}
+          onReviewInAdmin={() => {
+            userManuallyNavigatedRef.current = true;
+            setAdminSubTab('pending');
+            setActiveTab('admin');
+            setIsPendingModalOpen(false);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
       )}
 
       {/* Modal de Importação de Agendamentos por Lote (Exclusivo TI/Admin) */}

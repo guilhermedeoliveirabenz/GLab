@@ -50,6 +50,7 @@ interface NavbarProps {
   pendingBookings?: Booking[];
   upcomingAlerts?: UpcomingAlertItem[];
   onOpenUpcomingAlert?: (alert: UpcomingAlertItem) => void;
+  onOpenPendingPopUp?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -60,6 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   pendingBookings = [],
   upcomingAlerts = [],
   onOpenUpcomingAlert,
+  onOpenPendingPopUp,
 }) => {
   const { user, isAdmin, logout, teacherSession, logoutTeacher } = useAuth();
   const [soundOn, setSoundOn] = useState(isSoundEnabled());
@@ -408,17 +410,32 @@ export const Navbar: React.FC<NavbarProps> = ({
                             Agendamentos Pendentes ({pendingCount})
                           </span>
                           {pendingCount > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsNotifDropdownOpen(false);
-                                onSelectTab('admin', 'pending');
-                              }}
-                              className="text-[11px] font-bold text-amber-700 hover:text-amber-900 cursor-pointer flex items-center gap-0.5"
-                            >
-                              <span>Ver todos</span>
-                              <ChevronRight className="w-3 h-3" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              {onOpenPendingPopUp && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsNotifDropdownOpen(false);
+                                    onOpenPendingPopUp();
+                                  }}
+                                  className="text-[11px] font-bold text-amber-800 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded cursor-pointer transition-colors"
+                                  title="Abrir janela Pop-up de Notificação"
+                                >
+                                  Abrir Pop-up
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsNotifDropdownOpen(false);
+                                  onSelectTab('admin', 'pending');
+                                }}
+                                className="text-[11px] font-bold text-amber-700 hover:text-amber-900 cursor-pointer flex items-center gap-0.5"
+                              >
+                                <span>Ver todos</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </button>
+                            </div>
                           )}
                         </div>
 
