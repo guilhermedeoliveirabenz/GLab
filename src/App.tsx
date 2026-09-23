@@ -3,7 +3,7 @@ import { AuthProvider, useAuth } from './lib/authContext';
 import { Booking, Lab, LAB_LIST, ShiftType } from './types';
 import { subscribeToBookings, deduplicateBookings, isSelfCreatedBooking, markBookingAsSelfCreated } from './lib/bookingService';
 import { subscribeToLabs } from './lib/labService';
-import { subscribeToEmailSettings } from './lib/settingsService';
+import { subscribeToEmailSettings, subscribeToInitialTab, getLocalInitialTab } from './lib/settingsService';
 import { Navbar, ActiveTab } from './components/Navbar';
 import { LabGrid } from './components/LabGrid';
 import { BookingForm } from './components/BookingForm';
@@ -33,7 +33,8 @@ function AppContent() {
   const { isAdmin, user, teacherSession } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [labs, setLabs] = useState<Lab[]>(LAB_LIST);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('calendar');
+  const userManuallyNavigatedRef = React.useRef(false);
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => getLocalInitialTab());
   const [preselectedLabId, setPreselectedLabId] = useState<string>('');
   const [preselectedDate, setPreselectedDate] = useState<string>('');
   const [preselectedShift, setPreselectedShift] = useState<ShiftType | undefined>();
@@ -44,6 +45,16 @@ function AppContent() {
   const isInitialLoadRef = React.useRef(true);
   const prevBookingsRef = React.useRef<Booking[]>([]);
   const teacherSessionRef = React.useRef(teacherSession);
+
+  // Sincroniza a aba inicial configurada pelo administrador caso o usuário ainda não tenha navegado
+  useEffect(() => {
+    const unsubInitialTab = subscribeToInitialTab((configuredTab) => {
+      if (!userManuallyNavigatedRef.current) {
+        setActiveTab(configuredTab);
+      }
+    });
+    return () => unsubInitialTab();
+  }, []);
 
   // Mantém a referência da sessão do professor atualizada para uso nas callbacks
   useEffect(() => {
@@ -126,7 +137,7 @@ function AppContent() {
   // O painel de admin só deve aparecer para usuário admin ou técnico logado
   useEffect(() => {
     if (activeTab === 'admin' && !isAdmin) {
-      setActiveTab('calendar');
+      setActiveTab(getLocalInitialTab());
     }
   }, [activeTab, isAdmin]);
 
@@ -137,6 +148,7 @@ function AppContent() {
     if (!isAdmin && targetLab && targetLab.visibleForBooking === false) {
       return;
     }
+    userManuallyNavigatedRef.current = true;
     setPreselectedLabId(labId);
     setPreselectedDate('');
     setPreselectedShift(undefined);
@@ -145,6 +157,7 @@ function AppContent() {
   };
 
   const handleOpenBooking = () => {
+    userManuallyNavigatedRef.current = true;
     setPreselectedLabId('');
     setPreselectedDate('');
     setPreselectedShift(undefined);
@@ -174,6 +187,7 @@ function AppContent() {
       <Navbar
         activeTab={activeTab}
         onSelectTab={(tab) => {
+          userManuallyNavigatedRef.current = true;
           if (tab === 'admin' && !isAdmin) {
             setIsLoginModalOpen(true);
           } else {
@@ -254,6 +268,7 @@ function AppContent() {
             preselectedDate={preselectedDate}
             preselectedShift={preselectedShift}
             onBookingCreated={handleBookingCreated}
+            onLabChange={(newId) => setPreselectedLabId(newId)}
           />
         )}
 
@@ -298,6 +313,7 @@ function AppContent() {
               labs={labs}
               onOpenBatchImport={isAdmin ? () => setIsBatchImportOpen(true) : undefined}
               onRequestNewBooking={(date, shift, labId) => {
+                userManuallyNavigatedRef.current = true;
                 setPreselectedDate(date);
                 setPreselectedShift(shift);
                 setPreselectedLabId(labId && labId !== 'all' ? labId : '');

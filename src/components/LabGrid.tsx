@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Lab, LAB_LIST, Booking } from '../types';
 import {
   Monitor,
@@ -48,7 +48,10 @@ export const LabGrid: React.FC<LabGridProps> = ({
     setIsLabModalOpen(true);
   };
 
-  const visibleLabs = labs.filter((lab) => isAdmin || lab.visibleForBooking !== false);
+  const visibleLabs = useMemo(() => {
+    const filtered = labs.filter((lab) => isAdmin || lab.visibleForBooking !== false);
+    return filtered.length > 0 ? filtered : labs;
+  }, [labs, isAdmin]);
 
   const filteredLabs = visibleLabs.filter((lab) => {
     if (filterType === 'fixed' && lab.isMobile) return false;

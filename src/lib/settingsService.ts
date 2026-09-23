@@ -316,3 +316,154 @@ export async function updateInstitutionSubtitle(newSubtitle: string): Promise<{ 
     };
   }
 }
+
+/* =========================================================================
+   CONFIGURAÇÃO DE ABA / VISUALIZAÇÃO INICIAL PADRÃO DO SISTEMA
+   Permite ao Administrador escolher qual aba o GestLab abre por padrão:
+   - 'calendar': Calendário Geral (padrão)
+   - 'booking': Novo Agendamento (Reserva Direta)
+   - 'labs': Laboratórios & Status
+   - 'my_bookings': Meus Agendamentos
+   ========================================================================= */
+
+export type InitialViewTab = 'calendar' | 'booking' | 'labs' | 'my_bookings';
+export const DEFAULT_INITIAL_TAB: InitialViewTab = 'calendar';
+export const LOCAL_STORAGE_INITIAL_TAB_KEY = 'gestlab_default_initial_tab';
+
+export interface InitialTabOption {
+  id: InitialViewTab;
+  label: string;
+  shortName: string;
+  description: string;
+  iconName: string;
+}
+
+export const AVAILABLE_INITIAL_TABS: InitialTabOption[] = [
+  {
+    id: 'calendar',
+    label: 'Calendário Geral',
+    shortName: 'Calendário',
+    description: 'Visualização mensal e semanal de ocupação de laboratórios e horários.',
+    iconName: 'CalendarDays',
+  },
+  {
+    id: 'booking',
+    label: 'Novo Agendamento (Reserva)',
+    shortName: 'Fazer Agendamento',
+    description: 'Formulário limpo e direto para envio de pedidos de aula.',
+    iconName: 'CalendarPlus',
+  },
+  {
+    id: 'labs',
+    label: 'Laboratórios & Status',
+    shortName: 'Laboratórios',
+    description: 'Vitrine visual de laboratórios fixos e carrinhos móveis com status.',
+    iconName: 'Monitor',
+  },
+  {
+    id: 'my_bookings',
+    label: 'Meus Agendamentos',
+    shortName: 'Consultar Reservas',
+    description: 'Consulta rápida e cancelamento de reservas realizadas por WhatsApp.',
+    iconName: 'Users',
+  },
+];
+
+// Obtém o valor salvo no localStorage ou o padrão 'calendar'
+export function getLocalInitialTab(): InitialViewTab {
+  try {
+    const saved = localStorage.getItem(LOCAL_STORAGE_INITIAL_TAB_KEY);
+    if (saved && ['calendar', 'booking', 'labs', 'my_bookings'].includes(saved)) {
+      return saved as InitialViewTab;
+    }
+  } catch (e) {
+    console.warn('Erro ao ler aba inicial do localStorage:', e);
+  }
+  return DEFAULT_INITIAL_TAB;
+}
+
+// Grava no cache local
+export function setLocalInitialTab(tab: InitialViewTab): void {
+  try {
+    if (['calendar', 'booking', 'labs', 'my_bookings'].includes(tab)) {
+      localStorage.setItem(LOCAL_STORAGE_INITIAL_TAB_KEY, tab);
+    }
+  } catch (e) {
+    console.warn('Erro ao gravar aba inicial no localStorage:', e);
+  }
+}
+
+// Escuta em tempo real as alterações da aba inicial feitas pelo administrador
+export function subscribeToInitialTab(callback: (tab: InitialViewTab) => void): () => void {
+  const initial = getLocalInitialTab();
+  callback(initial);
+
+  if (!db) {
+    return () => {};
+  }
+
+  try {
+    const docRef = doc(db, SETTINGS_COLLECTION, INSTITUTION_DOC);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const configuredTab = data?.initialTab;
+          if (
+            configuredTab &&
+            typeof configuredTab === 'string' &&
+            ['calendar', 'booking', 'labs', 'my_bookings'].includes(configuredTab)
+          ) {
+            const validTab = configuredTab as InitialViewTab;
+            setLocalInitialTab(validTab);
+            callback(validTab);
+            return;
+          }
+        }
+        callback(getLocalInitialTab());
+      },
+      (error) => {
+        console.warn('Erro ao escutar aba inicial no Firestore:', error);
+        callback(getLocalInitialTab());
+      },
+    );
+
+    return unsubscribe;
+  } catch (err) {
+    console.warn('Falha ao inicializar listener de aba inicial:', err);
+    return () => {};
+  }
+}
+
+// Atualização da aba inicial feita pelo Administrador
+export async function updateInitialTab(newTab: InitialViewTab): Promise<{ success: boolean; error?: string }> {
+  if (!['calendar', 'booking', 'labs', 'my_bookings'].includes(newTab)) {
+    return { success: false, error: 'Aba selecionada inválida.' };
+  }
+
+  setLocalInitialTab(newTab);
+
+  if (!db) {
+    return { success: true };
+  }
+
+  try {
+    const docRef = doc(db, SETTINGS_COLLECTION, INSTITUTION_DOC);
+    await setDoc(
+      docRef,
+      {
+        initialTab: newTab,
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    );
+    return { success: true };
+  } catch (error: any) {
+    console.error('Erro ao atualizar aba inicial no Firestore:', error);
+    return {
+      success: false,
+      error: error?.message || 'Falha ao salvar configuração no servidor.',
+    };
+  }
+}

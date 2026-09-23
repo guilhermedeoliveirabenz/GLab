@@ -883,6 +883,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
       ) : activeTab === 'calendar' ? (
         <BookingCalendar
           bookings={bookings}
+          labs={labs}
           onSelectBooking={(b) => handleOpenWhatsAppModal(b)}
         />
       ) : activeTab === 'schedule' ? (

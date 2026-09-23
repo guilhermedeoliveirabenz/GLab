@@ -32,6 +32,8 @@ import {
   AtSign,
   MailPlus,
   ExternalLink,
+  CalendarDays,
+  CalendarPlus,
 } from 'lucide-react';
 import {
   subscribeToInstitutionSubtitle,
@@ -42,6 +44,11 @@ import {
   DEFAULT_ADMIN_NOTIFICATION_EMAIL,
   DEFAULT_EMAIL_SETTINGS,
   DEFAULT_SMTP_CONFIG,
+  subscribeToInitialTab,
+  updateInitialTab,
+  AVAILABLE_INITIAL_TABS,
+  InitialViewTab,
+  DEFAULT_INITIAL_TAB,
 } from '../lib/settingsService';
 import {
   sendTestNotificationEmail,
@@ -70,6 +77,11 @@ export const AdminSecurityPanel: React.FC = () => {
   const [subtitleInput, setSubtitleInput] = useState(DEFAULT_INSTITUTION_SUBTITLE);
   const [savingSubtitle, setSavingSubtitle] = useState(false);
   const [subtitleSuccess, setSubtitleSuccess] = useState<string | null>(null);
+
+  // Configurações da Aba / Visualização Inicial Padrão
+  const [selectedInitialTab, setSelectedInitialTab] = useState<InitialViewTab>(DEFAULT_INITIAL_TAB);
+  const [savingInitialTab, setSavingInitialTab] = useState(false);
+  const [initialTabSuccess, setInitialTabSuccess] = useState<string | null>(null);
 
   // Configurações de Notificações por E-mail
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(DEFAULT_EMAIL_SETTINGS);
@@ -388,6 +400,32 @@ export const AdminSecurityPanel: React.FC = () => {
       console.error('Erro ao restaurar padrão:', e);
     } finally {
       setSavingSubtitle(false);
+    }
+  };
+
+  // Sincronização em tempo real da visualização inicial configurada
+  useEffect(() => {
+    const unsub = subscribeToInitialTab((tab) => {
+      setSelectedInitialTab(tab);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSaveInitialTab = async (tab: InitialViewTab) => {
+    setSelectedInitialTab(tab);
+    setSavingInitialTab(true);
+    setInitialTabSuccess(null);
+    try {
+      const res = await updateInitialTab(tab);
+      if (res.success) {
+        const option = AVAILABLE_INITIAL_TABS.find((t) => t.id === tab);
+        setInitialTabSuccess(`Visualização inicial alterada com sucesso para "${option?.label || tab}"!`);
+      }
+      setTimeout(() => setInitialTabSuccess(null), 4000);
+    } catch (e) {
+      console.error('Erro ao atualizar aba inicial:', e);
+    } finally {
+      setSavingInitialTab(false);
     }
   };
 
@@ -770,6 +808,115 @@ export const AdminSecurityPanel: React.FC = () => {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* Card: Visualização Inicial Padrão do Sistema (Aba de Abertura) */}
+      <div
+        id="admin-initial-tab-card"
+        className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-5"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold shadow-xs">
+              <Sliders className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Visualização Inicial do Sistema (Aba Padrão de Abertura)
+                </h3>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Aba Ativa: {AVAILABLE_INITIAL_TABS.find((t) => t.id === selectedInitialTab)?.shortName || 'Calendário'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Escolha qual aba é exibida automaticamente quando professores, técnicos ou alunos entram no GestLab.
+              </p>
+            </div>
+          </div>
+
+          <span className="text-[11px] font-medium text-slate-500 bg-slate-50 border border-slate-200 px-3 py-1 rounded-xl self-start sm:self-auto">
+            Sincronização em tempo real
+          </span>
+        </div>
+
+        {initialTabSuccess && (
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2 animate-fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{initialTabSuccess}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {AVAILABLE_INITIAL_TABS.map((tabOption) => {
+            const isSelected = selectedInitialTab === tabOption.id;
+            return (
+              <div
+                key={tabOption.id}
+                id={`admin-select-initial-tab-${tabOption.id}`}
+                onClick={() => handleSaveInitialTab(tabOption.id)}
+                className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between relative text-left ${
+                  isSelected
+                    ? 'bg-indigo-50/70 border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs'
+                    : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2.5">
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {tabOption.id === 'calendar' && <CalendarDays className="w-4 h-4" />}
+                      {tabOption.id === 'booking' && <CalendarPlus className="w-4 h-4" />}
+                      {tabOption.id === 'labs' && <Monitor className="w-4 h-4" />}
+                      {tabOption.id === 'my_bookings' && <Users className="w-4 h-4" />}
+                    </div>
+
+                    {isSelected ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-600 text-white">
+                        Padrão Ativo
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-medium hover:text-indigo-600">
+                        Clique para definir
+                      </span>
+                    )}
+                  </div>
+
+                  <h4 className="text-xs font-bold text-slate-900 leading-tight">
+                    {tabOption.label}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    {tabOption.description}
+                  </p>
+                </div>
+
+                <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px]">
+                  <span className="text-slate-400">Identificador:</span>
+                  <span className="font-mono text-slate-600 font-semibold">{tabOption.id}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs text-slate-600">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-slate-700">Como funciona:</span>
+            <span>Ao clicar em qualquer cartão acima, a nova visualização padrão é gravada no banco e passa a carregar para todos os visitantes do sistema.</span>
+          </div>
+          {savingInitialTab && (
+            <span className="text-indigo-600 font-semibold text-xs flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-indigo-600 animate-ping" />
+              Salvando...
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Card 4: Configuração de Notificações por E-mail para Técnicos e Administradores */}

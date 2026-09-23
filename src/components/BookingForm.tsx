@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Booking, LAB_LIST, Lab, RecurrenceType, EducationLevel, ShiftType } from '../types';
 import { EducationBadge, EducationLevelSelector } from './EducationBadge';
 import { checkBookingConflict, createBooking, createRecurringBookings } from '../lib/bookingService';
@@ -66,6 +66,7 @@ interface BookingFormProps {
   preselectedDate?: string;
   preselectedShift?: ShiftType;
   onBookingCreated?: (booking: Booking) => void;
+  onLabChange?: (labId: string) => void;
 }
 
 export const BookingForm: React.FC<BookingFormProps> = ({
@@ -75,6 +76,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   preselectedDate,
   preselectedShift,
   onBookingCreated,
+  onLabChange,
 }) => {
   const { teacherSession, loginTeacher, isAdmin } = useAuth();
   const [allowUrgentBypass, setAllowUrgentBypass] = useState(false);
@@ -86,11 +88,14 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   // Se houver data pré-selecionada, utilize-a; caso contrário, use minDate (1ª data permitida)
   const defaultDate = preselectedDate || minDate;
 
-  // Filtra laboratórios visíveis para agendamento (professores veem estritamente apenas labs com visibleForBooking !== false)
-  const availableLabs = labs.filter((l) => {
-    if (isAdmin) return true;
-    return l.visibleForBooking !== false;
-  });
+  // Filtra laboratórios visíveis para agendamento (com salvaguarda para nunca travar sem opções)
+  const availableLabs = useMemo(() => {
+    const filtered = labs.filter((l) => {
+      if (isAdmin) return true;
+      return l.visibleForBooking !== false;
+    });
+    return filtered.length > 0 ? filtered : labs;
+  }, [labs, isAdmin]);
 
   const [teacherName, setTeacherName] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
@@ -101,7 +106,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     if (preselectedLabId && availableLabs.some((l) => l.id === preselectedLabId)) {
       return preselectedLabId;
     }
-    return availableLabs[0]?.id || (isAdmin ? (labs[0]?.id || 'lab-1') : '');
+    return availableLabs[0]?.id || (isAdmin ? (labs[0]?.id || 'lab-1') : 'lab-1');
   });
   const selectedLab =
     availableLabs.find((l) => l.id === labId) ||
@@ -117,20 +122,20 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
   // Sincroniza se laboratório selecionado não estiver mais entre os disponíveis caso a lista remota mude
   useEffect(() => {
-    if (!isAdmin && availableLabs.length > 0 && !availableLabs.some((l) => l.id === labId)) {
+    if (availableLabs.length > 0 && !availableLabs.some((l) => l.id === labId)) {
       setLabId(availableLabs[0].id);
       setRequestedMachines(availableLabs[0].capacity);
     }
-  }, [availableLabs, isAdmin]);
+  }, [availableLabs, labId]);
 
   // Recurring Booking State
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceType>('weekly');
   const [recurrenceCount, setRecurrenceCount] = useState<number>(4);
   const [recurrenceEndDate, setRecurrenceEndDate] = useState<string>(() => {
-    return calculateEndDateFromCount(defaultDate, 'weekly', 4, true);
+    return calculateEndDateFromCount(defaultDate, 'weekly', 4, false);
   });
-  const [skipWeekends, setSkipWeekends] = useState(true);
+  const [skipWeekends, setSkipWeekends] = useState(false);
   const [showRecurrenceModal, setShowRecurrenceModal] = useState(false);
   const [calculatedDates, setCalculatedDates] = useState<string[]>([]);
   const [recurrenceConflicts, setRecurrenceConflicts] = useState<{ date: string; conflict: Booking }[]>([]);
@@ -221,7 +226,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   // Adjust machines when selected lab changes
   const handleLabChange = (newLabId: string) => {
     setLabId(newLabId);
+    lastPreselectedLabIdRef.current = newLabId;
     setConflictError(null);
+    onLabChange?.(newLabId);
     const lab = labs.find((l) => l.id === newLabId);
     if (lab) {
       setRequestedMachines(lab.capacity);
@@ -1008,9 +1015,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     ({minDateFull.split(',')[0]} até {maxDateFull.split(',')[0]})
                   </span>
                 </div>
-                <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
-                  <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                  <span>Sábados e domingos não contam como dias úteis.</span>
+                <div className="text-[11px] text-slate-600 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Sábados e domingos liberados para agendamento (antecedência calculada em dias úteis).</span>
                 </div>
               </div>
             </div>

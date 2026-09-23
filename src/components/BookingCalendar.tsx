@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Booking, LAB_LIST, Lab, EducationLevel, ShiftType } from '../types';
 import { EducationBadge } from './EducationBadge';
 import { formatDateBR } from '../lib/whatsapp';
@@ -207,7 +207,10 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
 }) => {
   const { isAdmin: authIsAdmin } = useAuth();
   const isAdmin = propIsAdmin !== undefined ? propIsAdmin : authIsAdmin;
-  const availableLabs = labs.filter((l) => isAdmin || l.visibleForBooking !== false);
+  const availableLabs = useMemo(() => {
+    const filtered = labs.filter((l) => isAdmin || l.visibleForBooking !== false);
+    return filtered.length > 0 ? filtered : labs;
+  }, [labs, isAdmin]);
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [selectedLabId, setSelectedLabId] = useState<string>('all');

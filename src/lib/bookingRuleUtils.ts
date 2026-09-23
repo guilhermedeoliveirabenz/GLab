@@ -2,7 +2,8 @@
  * Regras Oficiais de Agendamento Escolar de Laboratórios
  * - Antecedência mínima: Pelo menos 3 dias úteis.
  * - Prazo máximo: No máximo 20 dias úteis para frente.
- * - Dias úteis considerados: Segunda a Sexta-feira (exclui Sábados e Domingos).
+ * - Finais de semana: Agendamentos aos sábados e domingos são permitidos.
+ * - Contagem de dias úteis para prazos: Segunda a Sexta-feira.
  */
 
 export const MIN_BOOKING_ADVANCE_WORKING_DAYS = 3;
@@ -126,7 +127,19 @@ export function getBookingDateLimits(referenceDateStr = getTodayDateString()): {
 } {
   const todayStr = referenceDateStr;
   const minDate = addWorkingDaysToDate(todayStr, MIN_BOOKING_ADVANCE_WORKING_DAYS);
-  const maxDate = addWorkingDaysToDate(todayStr, MAX_BOOKING_ADVANCE_WORKING_DAYS);
+  let maxDate = addWorkingDaysToDate(todayStr, MAX_BOOKING_ADVANCE_WORKING_DAYS);
+
+  // Se a data limite máxima cair em uma sexta-feira, estende até domingo
+  // para permitir o agendamento de sábado e domingo daquela mesma semana
+  const [my, mm, md] = maxDate.split('-').map(Number);
+  const maxObj = new Date(my, mm - 1, md);
+  if (maxObj.getDay() === 5) { // Sexta-feira
+    maxObj.setDate(maxObj.getDate() + 2); // Estende até domingo
+    const yr = maxObj.getFullYear();
+    const mo = String(maxObj.getMonth() + 1).padStart(2, '0');
+    const da = String(maxObj.getDate()).padStart(2, '0');
+    maxDate = `${yr}-${mo}-${da}`;
+  }
 
   return {
     todayStr,
@@ -154,6 +167,7 @@ export interface BookingDateValidationResult {
  * Valida se uma data respeita as regras de agendamento:
  * - Pelo menos 3 dias úteis de antecedência
  * - No máximo 20 dias úteis para frente
+ * - Permite agendamentos em dias de semana E em finais de semana (sábados e domingos)
  */
 export function validateBookingLeadTime(
   dateStr: string,
@@ -201,25 +215,14 @@ export function validateBookingLeadTime(
     };
   }
 
-  // 2. Finais de semana
-  if (weekend) {
-    return {
-      isValid: false,
-      isWeekend: true,
-      workingDaysAhead,
-      errorReason:
-        'A data selecionada cai em um fim de semana (sábado ou domingo). Os agendamentos devem ser realizados apenas para dias úteis (segunda a sexta-feira).',
-      warningMessage: null,
-      minAllowedDate: limits.minDate,
-      maxAllowedDate: limits.maxDate,
-    };
-  }
+  // 2. Finais de semana (Sábado e Domingo): Totalmente liberados!
+  // Apenas devem obedecer ao prazo de antecedência em dias úteis.
 
   // 3. Menos de 3 dias úteis de antecedência
   if (dateStr < limits.minDate || workingDaysAhead < MIN_BOOKING_ADVANCE_WORKING_DAYS) {
     return {
       isValid: false,
-      isWeekend: false,
+      isWeekend: weekend,
       workingDaysAhead,
       errorReason: `Antecedência insuficiente: o agendamento deve ser realizado com pelo menos ${MIN_BOOKING_ADVANCE_WORKING_DAYS} dias úteis de antecedência. A data mais próxima permitida é ${limits.minDateFull}.`,
       warningMessage: null,
@@ -232,7 +235,7 @@ export function validateBookingLeadTime(
   if (dateStr > limits.maxDate || workingDaysAhead > MAX_BOOKING_ADVANCE_WORKING_DAYS) {
     return {
       isValid: false,
-      isWeekend: false,
+      isWeekend: weekend,
       workingDaysAhead,
       errorReason: `Prazo limite excedido: o agendamento pode ser feito no máximo ${MAX_BOOKING_ADVANCE_WORKING_DAYS} dias úteis para frente. A data limite máxima é ${limits.maxDateFull}.`,
       warningMessage: null,
@@ -244,10 +247,10 @@ export function validateBookingLeadTime(
   // Data válida e dentro das regras!
   return {
     isValid: true,
-    isWeekend: false,
+    isWeekend: weekend,
     workingDaysAhead,
     errorReason: null,
-    warningMessage: `Data válida: ${workingDaysAhead} dia(s) útil(eis) de antecedência (dentro da janela permitida de ${MIN_BOOKING_ADVANCE_WORKING_DAYS} a ${MAX_BOOKING_ADVANCE_WORKING_DAYS} dias úteis).`,
+    warningMessage: `Data válida${weekend ? ' (Fim de semana liberado - Sábado/Domingo)' : ''}: ${workingDaysAhead} dia(s) útil(eis) de antecedência (janela permitida de ${MIN_BOOKING_ADVANCE_WORKING_DAYS} a ${MAX_BOOKING_ADVANCE_WORKING_DAYS} dias úteis).`,
     minAllowedDate: limits.minDate,
     maxAllowedDate: limits.maxDate,
   };
