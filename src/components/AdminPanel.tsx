@@ -51,15 +51,23 @@ import { downloadTeacherTemplateFile } from '../lib/batchScheduleParser';
 interface AdminPanelProps {
   bookings: Booking[];
   labs?: Lab[];
+  initialSubTab?: 'all' | 'pending' | 'calendar' | 'mobile_route' | 'schedule' | 'technicians' | 'softwares' | 'security';
 }
 
-export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIST }) => {
+export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIST, initialSubTab }) => {
   const { isSuperAdmin, user } = useAuth();
   const todayStr = new Date().toISOString().split('T')[0];
 
   const [activeTab, setActiveTab] = useState<
     'all' | 'pending' | 'calendar' | 'mobile_route' | 'schedule' | 'technicians' | 'softwares' | 'security'
-  >('pending');
+  >(initialSubTab || 'pending');
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
   const [isMenuDropdownOpen, setIsMenuDropdownOpen] = useState(false);
   const menuDropdownRef = useRef<HTMLDivElement>(null);
 

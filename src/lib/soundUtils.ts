@@ -143,3 +143,40 @@ export function playNotificationPingSound(): void {
     console.warn('Erro ao reproduzir ping:', e);
   }
 }
+
+/**
+ * Notificação de Alerta Pré-Agendamento (20 minutos antes do início da aula)
+ * Chime suave triplo harmônico de alta visibilidade
+ */
+export function playUpcomingBooking20MinReminderSound(): void {
+  if (!isSoundEnabled()) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+    playTone(ctx, 554.37, now + 0.00, 0.22, 'triangle', 0.28); // C#5
+    playTone(ctx, 659.25, now + 0.12, 0.22, 'triangle', 0.28); // E5
+    playTone(ctx, 880.00, now + 0.24, 0.45, 'sine', 0.32);     // A5
+  } catch (e) {
+    console.warn('Erro ao reproduzir alerta de 20 minutos:', e);
+  }
+}
+
+/**
+ * Notificação de Agendamento Pendente (para técnicos e administradores)
+ */
+export function playPendingAlertSound(): void {
+  if (!isSoundEnabled()) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+    playTone(ctx, 493.88, now + 0.00, 0.18, 'sine', 0.25); // B4
+    playTone(ctx, 739.99, now + 0.10, 0.35, 'sine', 0.30); // F#5
+  } catch (e) {
+    console.warn('Erro ao reproduzir som de pendência:', e);
+  }
+}
+

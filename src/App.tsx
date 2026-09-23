@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { Booking, Lab, LAB_LIST, ShiftType } from './types';
 import { subscribeToBookings, deduplicateBookings, isSelfCreatedBooking, markBookingAsSelfCreated } from './lib/bookingService';
@@ -13,7 +13,19 @@ import { AdminLoginModal } from './components/AdminLoginModal';
 import { BookingCalendar } from './components/BookingCalendar';
 import { BatchImportModal } from './components/BatchImportModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { playNewBookingAlertSound } from './lib/soundUtils';
+import { Upcoming20MinAlertModal } from './components/Upcoming20MinAlertModal';
+import { PendingBookingsNotification } from './components/PendingBookingsNotification';
+import {
+  findUpcoming20MinAlerts,
+  UpcomingAlertItem,
+  is20MinAlertAcknowledged,
+  mark20MinAlertAcknowledged,
+} from './lib/bookingAlertService';
+import {
+  playNewBookingAlertSound,
+  playUpcomingBooking20MinReminderSound,
+  playPendingAlertSound,
+} from './lib/soundUtils';
 import {
   Monitor,
   Calendar,
@@ -35,6 +47,9 @@ function AppContent() {
   const [labs, setLabs] = useState<Lab[]>(LAB_LIST);
   const userManuallyNavigatedRef = React.useRef(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => getLocalInitialTab());
+  const [adminSubTab, setAdminSubTab] = useState<
+    'all' | 'pending' | 'calendar' | 'mobile_route' | 'schedule' | 'technicians' | 'softwares' | 'security'
+  >('pending');
   const [preselectedLabId, setPreselectedLabId] = useState<string>('');
   const [preselectedDate, setPreselectedDate] = useState<string>('');
   const [preselectedShift, setPreselectedShift] = useState<ShiftType | undefined>();
@@ -42,9 +57,85 @@ function AppContent() {
   const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
   const [latestNewBookingAlert, setLatestNewBookingAlert] = useState<Booking | null>(null);
 
+  // Alertas preventivos de 20 minutos
+  const [upcoming20MinAlerts, setUpcoming20MinAlerts] = useState<UpcomingAlertItem[]>([]);
+  const [modalAlertQueue, setModalAlertQueue] = useState<UpcomingAlertItem[]>([]);
+
   const isInitialLoadRef = React.useRef(true);
   const prevBookingsRef = React.useRef<Booking[]>([]);
   const teacherSessionRef = React.useRef(teacherSession);
+  const hasNotifiedPendingLoginRef = React.useRef(false);
+
+  // Lista de agendamentos pendentes
+  const pendingBookings = useMemo(() => bookings.filter((b) => b.status === 'pending'), [bookings]);
+  const pendingCount = pendingBookings.length;
+
+  // Notificação sonora e de boas-vindas para Administrador ou Técnico conectado com pendências
+  useEffect(() => {
+    if (isAdmin && pendingCount > 0 && !hasNotifiedPendingLoginRef.current) {
+      hasNotifiedPendingLoginRef.current = true;
+      playPendingAlertSound();
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification('🔔 GestLab: Agendamentos Pendentes', {
+            body: `Olá ${user?.name || 'Técnico/Admin'}, existem ${pendingCount} agendamento(s) aguardando sua revisão e aprovação.`,
+            icon: '/icon.svg',
+          });
+        } catch (e) {
+          console.warn('Erro ao disparar Web Notification de pendências:', e);
+        }
+      }
+    }
+    if (!isAdmin) {
+      hasNotifiedPendingLoginRef.current = false;
+    }
+  }, [isAdmin, pendingCount, user]);
+
+  // Monitoramento contínuo em tempo real para alerta de 20 minutos antes do início do agendamento
+  useEffect(() => {
+    const checkUpcomingAlerts = () => {
+      const now = new Date();
+      const upcoming = findUpcoming20MinAlerts(bookings, now);
+      setUpcoming20MinAlerts(upcoming);
+
+      // Identifica itens dentro da janela de 20 minutos que ainda não foram apresentados nesta sessão
+      const unacknowledged = upcoming.filter((item) => !is20MinAlertAcknowledged(item.alertKey));
+      if (unacknowledged.length > 0) {
+        // Marca como notificado no storage da sessão para não ficar repetindo a cada ciclo do timer
+        unacknowledged.forEach((u) => mark20MinAlertAcknowledged(u.alertKey));
+
+        // Reproduz o alarme preventivo suave de 20 minutos
+        playUpcomingBooking20MinReminderSound();
+
+        // Enfileira para exibição do modal de alerta
+        setModalAlertQueue((prev) => {
+          const existingKeys = new Set(prev.map((p) => p.alertKey));
+          const toAdd = unacknowledged.filter((u) => !existingKeys.has(u.alertKey));
+          return [...prev, ...toAdd];
+        });
+
+        // Notificação nativa na área de trabalho/sistema operacional se autorizada
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+          try {
+            const first = unacknowledged[0];
+            const labNote = first.booking.isMobileLab && first.booking.roomNumber
+              ? ` (Carrinho na Sala ${first.booking.roomNumber})`
+              : '';
+            new Notification('⏰ GestLab: Agendamento em 20 Minutos!', {
+              body: `Aula de ${first.booking.teacherName} no ${first.booking.labName} inicia às ${first.booking.timeSlot}${labNote}`,
+              icon: '/icon.svg',
+            });
+          } catch (e) {
+            console.warn('Erro ao disparar Web Notification de 20 minutos:', e);
+          }
+        }
+      }
+    };
+
+    checkUpcomingAlerts();
+    const interval = setInterval(checkUpcomingAlerts, 15000); // Checa a cada 15 segundos
+    return () => clearInterval(interval);
+  }, [bookings]);
 
   // Sincroniza a aba inicial configurada pelo administrador caso o usuário ainda não tenha navegado
   useEffect(() => {
@@ -141,8 +232,6 @@ function AppContent() {
     }
   }, [activeTab, isAdmin]);
 
-  const pendingCount = bookings.filter((b) => b.status === 'pending').length;
-
   const handleSelectLabToBook = (labId: string) => {
     const targetLab = labs.find((l) => l.id === labId);
     if (!isAdmin && targetLab && targetLab.visibleForBooking === false) {
@@ -186,8 +275,11 @@ function AppContent() {
       {/* Navbar com Autenticação e Tabs */}
       <Navbar
         activeTab={activeTab}
-        onSelectTab={(tab) => {
+        onSelectTab={(tab, subTab) => {
           userManuallyNavigatedRef.current = true;
+          if (subTab) {
+            setAdminSubTab(subTab as any);
+          }
           if (tab === 'admin' && !isAdmin) {
             setIsLoginModalOpen(true);
           } else {
@@ -196,6 +288,9 @@ function AppContent() {
         }}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         pendingCount={pendingCount}
+        pendingBookings={pendingBookings}
+        upcomingAlerts={upcoming20MinAlerts}
+        onOpenUpcomingAlert={(alert) => setModalAlertQueue([alert])}
       />
 
       {/* Indicador de Status Offline/Online PWA */}
@@ -209,8 +304,13 @@ function AppContent() {
               <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
                 <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
                   <Shield className="w-3 h-3 text-amber-600" />
-                  Modo Administrador Ativo
+                  Modo {user?.role === 'technician' ? 'Técnico de TI' : 'Administrador'} Ativo
                 </span>
+                {pendingCount > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-full border border-red-200 animate-pulse">
+                    ● {pendingCount} {pendingCount === 1 ? 'pendência' : 'pendências'}
+                  </span>
+                )}
               </div>
             )}
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">
@@ -237,12 +337,20 @@ function AppContent() {
             {isAdmin && (
               <button
                 id="hero-admin-panel-btn"
-                onClick={() => setActiveTab('admin')}
+                onClick={() => {
+                  userManuallyNavigatedRef.current = true;
+                  setActiveTab('admin');
+                }}
                 className="flex-1 sm:flex-initial px-3.5 py-2 sm:px-4 sm:py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer min-h-[40px]"
               >
                 <Shield className="w-3.5 h-3.5 text-amber-400" />
                 <span className="hidden sm:inline">{user?.role === 'technician' ? 'Painel do Técnico' : 'Painel Administrativo'}</span>
                 <span className="sm:hidden">Painel</span>
+                {pendingCount > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] font-extrabold flex items-center justify-center">
+                    {pendingCount}
+                  </span>
+                )}
               </button>
             )}
           </div>
@@ -251,6 +359,20 @@ function AppContent() {
 
       {/* Main Container com espaçamento otimizado para telas pequenas e barra de navegação inferior */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-6 lg:px-8 py-3.5 sm:py-8 pb-24 md:pb-8">
+        {/* Notificação Visual para o Usuário Conectado (Técnico ou Admin) sobre Agendamentos Pendentes */}
+        {isAdmin && (
+          <PendingBookingsNotification
+            user={user}
+            pendingBookings={pendingBookings}
+            onOpenPendingTab={() => {
+              userManuallyNavigatedRef.current = true;
+              setAdminSubTab('pending');
+              setActiveTab('admin');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
+
         {activeTab === 'labs' && (
           <LabGrid
             bookings={bookings}
@@ -332,7 +454,7 @@ function AppContent() {
         )}
 
         {activeTab === 'admin' && isAdmin && (
-          <AdminPanel bookings={bookings} labs={labs} />
+          <AdminPanel bookings={bookings} labs={labs} initialSubTab={adminSubTab} />
         )}
       </main>
 
@@ -349,6 +471,32 @@ function AppContent() {
           </div>
         </div>
       </footer>
+
+      {/* Modal de Alerta de Agendamento Preventivo (20 minutos antes do início da aula) */}
+      {modalAlertQueue.length > 0 && (
+        <Upcoming20MinAlertModal
+          alerts={modalAlertQueue}
+          onAcknowledge={(alertKey) => {
+            setModalAlertQueue((prev) => prev.filter((a) => a.alertKey !== alertKey));
+          }}
+          onAcknowledgeAll={() => {
+            setModalAlertQueue([]);
+          }}
+          onNavigateToCalendar={() => {
+            userManuallyNavigatedRef.current = true;
+            setActiveTab('calendar');
+            setModalAlertQueue([]);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          onNavigateToAdmin={() => {
+            userManuallyNavigatedRef.current = true;
+            setAdminSubTab('pending');
+            setActiveTab('admin');
+            setModalAlertQueue([]);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
+      )}
 
       {/* Alerta Flutuante em Tempo Real para Técnicos/Administradores (não exibido para quem realizou o agendamento) */}
       {latestNewBookingAlert && !isSelfCreatedBooking(latestNewBookingAlert.id) && (

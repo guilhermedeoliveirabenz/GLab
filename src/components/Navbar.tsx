@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../lib/authContext';
 import {
   Monitor,
@@ -19,22 +19,37 @@ import {
   Check,
   RotateCcw,
   X,
+  Clock,
+  AlertTriangle,
+  Sparkles,
+  ExternalLink,
+  ChevronRight,
 } from 'lucide-react';
-import { isSoundEnabled, toggleSound, playNotificationPingSound } from '../lib/soundUtils';
+import {
+  isSoundEnabled,
+  toggleSound,
+  playNotificationPingSound,
+  playUpcomingBooking20MinReminderSound,
+} from '../lib/soundUtils';
 import { PWAInstallButton } from './PWAInstallButton';
 import {
   subscribeToInstitutionSubtitle,
   updateInstitutionSubtitle,
   DEFAULT_INSTITUTION_SUBTITLE,
 } from '../lib/settingsService';
+import { Booking } from '../types';
+import { UpcomingAlertItem } from '../lib/bookingAlertService';
 
 export type ActiveTab = 'booking' | 'labs' | 'calendar' | 'my_bookings' | 'admin';
 
 interface NavbarProps {
   activeTab: ActiveTab;
-  onSelectTab: (tab: ActiveTab) => void;
+  onSelectTab: (tab: ActiveTab, subTab?: string) => void;
   onOpenLoginModal: () => void;
   pendingCount: number;
+  pendingBookings?: Booking[];
+  upcomingAlerts?: UpcomingAlertItem[];
+  onOpenUpcomingAlert?: (alert: UpcomingAlertItem) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,10 +57,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectTab,
   onOpenLoginModal,
   pendingCount,
+  pendingBookings = [],
+  upcomingAlerts = [],
+  onOpenUpcomingAlert,
 }) => {
   const { user, isAdmin, logout, teacherSession, logoutTeacher } = useAuth();
   const [soundOn, setSoundOn] = useState(isSoundEnabled());
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>('default');
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+  const notifDropdownRef = useRef<HTMLDivElement>(null);
 
   // Subtítulo da instituição (padrão CTI/UNASP-HT com suporte a alteração pelo administrador)
   const [institutionSubtitle, setInstitutionSubtitle] = useState<string>(DEFAULT_INSTITUTION_SUBTITLE);
@@ -53,6 +73,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [newSubtitleInput, setNewSubtitleInput] = useState('');
   const [savingSubtitle, setSavingSubtitle] = useState(false);
   const [saveSubtitleSuccess, setSaveSubtitleSuccess] = useState(false);
+
+  // Fecha dropdown ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
+        setIsNotifDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const unsub = subscribeToInstitutionSubtitle((subtitle) => {
@@ -267,6 +298,211 @@ export const Navbar: React.FC<NavbarProps> = ({
               {soundOn ? <Volume2 className="w-4 h-4 text-blue-600" /> : <VolumeX className="w-4 h-4" />}
             </button>
 
+            {/* Central de Notificações para Usuário Conectado (Técnico ou Admin) */}
+            {isAdmin && (
+              <div className="relative" ref={notifDropdownRef}>
+                <button
+                  id="nav-admin-notif-bell"
+                  type="button"
+                  onClick={() => setIsNotifDropdownOpen((prev) => !prev)}
+                  title={
+                    pendingCount > 0 || upcomingAlerts.length > 0
+                      ? `Alertas Ativos: ${pendingCount} pendente(s) e ${upcomingAlerts.length} aula(s) em breve`
+                      : 'Central de Notificações'
+                  }
+                  className={`p-2 rounded-xl transition-all cursor-pointer border relative flex items-center justify-center ${
+                    pendingCount > 0 || upcomingAlerts.length > 0
+                      ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-400 shadow-md ring-2 ring-amber-300/60'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'
+                  }`}
+                >
+                  <Bell className={`w-4 h-4 ${pendingCount > 0 || upcomingAlerts.length > 0 ? 'animate-swing' : ''}`} />
+                  {(pendingCount > 0 || upcomingAlerts.length > 0) && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-600 text-white text-[10px] font-extrabold rounded-full flex items-center justify-center border-2 border-white shadow-xs">
+                      {pendingCount + upcomingAlerts.length}
+                    </span>
+                  )}
+                </button>
+
+                {/* Dropdown Popover da Central de Notificações */}
+                {isNotifDropdownOpen && (
+                  <div
+                    id="admin-notif-dropdown"
+                    className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-fade-in"
+                  >
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3.5 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                          <Bell className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-white">Central de Notificações</h4>
+                          <p className="text-[10px] text-slate-300">
+                            {user?.role === 'technician' ? 'Técnico de TI' : 'Administrador'} • {user?.name}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsNotifDropdownOpen(false)}
+                        className="p-1 text-slate-400 hover:text-white rounded-md transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-100 p-1">
+                      {/* Seção 1: Alertas Preventivos 20 Minutos */}
+                      {upcomingAlerts.length > 0 && (
+                        <div className="p-3 bg-blue-50/60 rounded-xl m-1 border border-blue-200">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[11px] font-extrabold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                              Alertas 20 Minutos ({upcomingAlerts.length})
+                            </span>
+                            <span className="text-[10px] bg-blue-200 text-blue-800 font-bold px-1.5 py-0.5 rounded">
+                              Hoje
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {upcomingAlerts.map((item) => (
+                              <div
+                                key={item.alertKey}
+                                className="bg-white p-2.5 rounded-lg border border-blue-100 shadow-2xs flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-bold text-slate-900 truncate">
+                                      {item.booking.labName}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                      inicia em ~{item.minutesLeft}m
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                                    Prof. {item.booking.teacherName} • {item.booking.timeSlot}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsNotifDropdownOpen(false);
+                                    onOpenUpcomingAlert?.(item);
+                                  }}
+                                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-lg shrink-0 transition-colors cursor-pointer"
+                                >
+                                  Ver
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Seção 2: Agendamentos Pendentes */}
+                      <div className="p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[11px] font-extrabold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                            Agendamentos Pendentes ({pendingCount})
+                          </span>
+                          {pendingCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsNotifDropdownOpen(false);
+                                onSelectTab('admin', 'pending');
+                              }}
+                              className="text-[11px] font-bold text-amber-700 hover:text-amber-900 cursor-pointer flex items-center gap-0.5"
+                            >
+                              <span>Ver todos</span>
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        {pendingCount === 0 ? (
+                          <div className="py-4 text-center">
+                            <Check className="w-6 h-6 text-emerald-500 mx-auto mb-1" />
+                            <p className="text-xs font-semibold text-slate-700">Tudo em dia!</p>
+                            <p className="text-[11px] text-slate-500">
+                              Não há agendamentos pendentes aguardando aprovação.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {pendingBookings.slice(0, 4).map((b) => (
+                              <div
+                                key={b.id}
+                                className="bg-amber-50/60 p-2.5 rounded-lg border border-amber-200/80 flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-bold text-slate-900 truncate">
+                                      {b.teacherName}
+                                    </span>
+                                    <span className="text-[10px] text-amber-800 bg-amber-100 font-semibold px-1.5 py-0.2 rounded">
+                                      {b.labName}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-600 truncate mt-0.5">
+                                    📅 {b.date} • ⏰ {b.timeSlot} (Turma: {b.classGroup})
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsNotifDropdownOpen(false);
+                                    onSelectTab('admin', 'pending');
+                                  }}
+                                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded-lg shrink-0 transition-colors cursor-pointer"
+                                >
+                                  Revisar
+                                </button>
+                              </div>
+                            ))}
+                            {pendingCount > 4 && (
+                              <p className="text-[10px] text-center text-slate-500 pt-1">
+                                + {pendingCount - 4} outro(s) agendamento(s) aguardando no painel
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer com Utilitários */}
+                    <div className="bg-slate-50 p-2.5 border-t border-slate-200 flex items-center justify-between text-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playUpcomingBooking20MinReminderSound();
+                        }}
+                        className="text-[11px] text-slate-600 hover:text-slate-900 font-semibold flex items-center gap-1 p-1 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
+                        title="Toca o efeito sonoro de aviso de 20 minutos"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Testar Alarme (20min)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsNotifDropdownOpen(false);
+                          onSelectTab('admin', 'pending');
+                        }}
+                        className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                      >
+                        <span>Painel Completo</span>
+                        <ExternalLink className="w-3 h-3 text-slate-400" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Desktop Notification Toggle (Web Notification API) */}
             {typeof window !== 'undefined' && 'Notification' in window && (
               <button
@@ -275,8 +511,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={handleRequestNotif}
                 title={
                   notifPerm === 'granted'
-                    ? 'Notificações no navegador ATIVADAS para novos agendamentos'
-                    : 'Clique para permitir notificações de novos agendamentos na tela do computador'
+                    ? 'Notificações no navegador ATIVADAS para novos agendamentos e alertas'
+                    : 'Clique para permitir notificações de novos agendamentos e alertas na tela do computador'
                 }
                 className={`p-2 rounded-xl transition-colors cursor-pointer border flex items-center gap-1 ${
                   notifPerm === 'granted'

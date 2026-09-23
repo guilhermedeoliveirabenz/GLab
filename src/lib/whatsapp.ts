@@ -182,3 +182,23 @@ export function getWhatsAppSendUrl(phone: string, text: string): string {
   const encodedText = encodeURIComponent(text);
   return `https://api.whatsapp.com/send?phone=${sanitized}&text=${encodedText}`;
 }
+
+/**
+ * Mensagem rápida de lembrete 20 minutos antes do início da aula
+ */
+export function generate20MinReminderWhatsAppMessage(booking: Booking, minutesLeft: number = 20): string {
+  const formattedDate = formatDateBR(booking.date);
+  return [
+    `*LEMBRETE DE AULA - GESTLAB* 🏫⏰`,
+    ``,
+    `Olá, *Prof. ${booking.teacherName}*!`,
+    `Seu agendamento para o *${booking.labName}* começará em cerca de *${minutesLeft} minutos* (${booking.timeSlot}).`,
+    ...(booking.isMobileLab && booking.roomNumber
+      ? [`🚚 *Carrinho Móvel:* Estamos preparando os notebooks para entrega na *Sala ${booking.roomNumber}*`]
+      : [`🖥️ O laboratório já está sendo preparado e liberado para a turma *${booking.classGroup}*.`]),
+    ``,
+    `Tenha uma excelente aula!`,
+    `Equipe de TI e Suporte a Laboratórios 🖥️`,
+  ].join('\n');
+}
+
