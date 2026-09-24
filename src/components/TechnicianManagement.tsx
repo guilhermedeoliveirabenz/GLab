@@ -234,6 +234,18 @@ export const TechnicianManagement: React.FC<TechnicianManagementProps> = ({
     }
   };
 
+  if (!isSuperAdmin) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center space-y-3">
+        <Shield className="w-10 h-10 text-amber-600 mx-auto" />
+        <h3 className="text-base font-bold text-slate-800">Acesso Restrito ao Administrador Geral</h3>
+        <p className="text-xs text-slate-600 max-w-md mx-auto">
+          Apenas Administradores podem visualizar ou gerenciar a equipe de técnicos de TI.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header Info */}

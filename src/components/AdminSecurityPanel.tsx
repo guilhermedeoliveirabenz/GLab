@@ -480,6 +480,18 @@ export const AdminSecurityPanel: React.FC = () => {
     }
   };
 
+  if (!isSuperAdmin) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center space-y-3">
+        <ShieldCheck className="w-10 h-10 text-amber-600 mx-auto" />
+        <h3 className="text-base font-bold text-slate-800">Acesso Restrito ao Administrador Geral</h3>
+        <p className="text-xs text-slate-600 max-w-md mx-auto">
+          Apenas Administradores podem gerenciar configurações de segurança, senhas e parâmetros institucionais.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}

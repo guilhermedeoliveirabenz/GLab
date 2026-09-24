@@ -58,15 +58,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
   const { isSuperAdmin, user } = useAuth();
   const todayStr = new Date().toISOString().split('T')[0];
 
+  // Tab inicial segura considerando privilégios de Administrador vs Técnico
+  const getInitialSafeTab = () => {
+    if (!isSuperAdmin && (initialSubTab === 'technicians' || initialSubTab === 'security')) {
+      return 'softwares';
+    }
+    return initialSubTab || 'pending';
+  };
+
   const [activeTab, setActiveTab] = useState<
     'all' | 'pending' | 'calendar' | 'mobile_route' | 'schedule' | 'technicians' | 'softwares' | 'security'
-  >(initialSubTab || 'pending');
+  >(getInitialSafeTab);
 
   useEffect(() => {
     if (initialSubTab) {
-      setActiveTab(initialSubTab);
+      if (!isSuperAdmin && (initialSubTab === 'technicians' || initialSubTab === 'security')) {
+        setActiveTab('softwares');
+      } else {
+        setActiveTab(initialSubTab);
+      }
     }
-  }, [initialSubTab]);
+  }, [initialSubTab, isSuperAdmin]);
+
+  // Bloqueio preventivo: técnicos não podem acessar abas restritas da administração
+  useEffect(() => {
+    if (!isSuperAdmin && (activeTab === 'technicians' || activeTab === 'security')) {
+      setActiveTab('softwares');
+    }
+  }, [isSuperAdmin, activeTab]);
 
   const [isMenuDropdownOpen, setIsMenuDropdownOpen] = useState(false);
   const menuDropdownRef = useRef<HTMLDivElement>(null);
@@ -421,7 +440,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                     {activeTab === 'schedule' && `Grade Diária (${labs.length} Labs)`}
                     {activeTab === 'mobile_route' && 'Roteiro de Carrinhos Móveis'}
                     {activeTab === 'technicians' && 'Equipe de Técnicos'}
-                    {activeTab === 'softwares' && 'Gestão de Labs (Incluir/Editar/Obs)'}
+                    {activeTab === 'softwares' && 'Gestão dos Laboratórios: Manutenção, Avisos & Softwares'}
                     {activeTab === 'security' && 'Segurança & Instituição'}
                   </h3>
                 </div>
@@ -488,6 +507,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
             >
               <Layers className="w-3.5 h-3.5" />
               <span>Todos</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('softwares');
+                setIsMenuDropdownOpen(false);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'softwares'
+                  ? 'bg-cyan-600 text-white shadow-xs'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
+              }`}
+              title="Gestão dos Laboratórios: Manutenção, Avisos & Softwares"
+            >
+              <Code className="w-3.5 h-3.5" />
+              <span>Gestão Labs</span>
             </button>
 
             <button
@@ -774,36 +810,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
             {/* Seção 2: Administração do Sistema & Equipe */}
             <div className="pt-2 border-t border-slate-100">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2 px-1">
-                Gestão Técnica & Configuração do GestLab
+                {isSuperAdmin ? 'Gestão Técnica & Configuração do GestLab' : 'Gestão dos Laboratórios'}
               </span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <button
-                  id="tab-technicians-btn"
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('technicians');
-                    setIsMenuDropdownOpen(false);
-                  }}
-                  className={`p-3 rounded-xl border text-left transition-all flex items-start justify-between gap-2 cursor-pointer ${
-                    activeTab === 'technicians'
-                      ? 'bg-blue-50/80 border-blue-400 ring-2 ring-blue-400/20'
-                      : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
-                      <Users className="w-3.5 h-3.5" />
+              <div className={`grid gap-2 ${isSuperAdmin ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1'}`}>
+                {/* Equipe de Técnicos - Exclusivo para Administrador Geral */}
+                {isSuperAdmin && (
+                  <button
+                    id="tab-technicians-btn"
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('technicians');
+                      setIsMenuDropdownOpen(false);
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all flex items-start justify-between gap-2 cursor-pointer ${
+                      activeTab === 'technicians'
+                        ? 'bg-blue-50/80 border-blue-400 ring-2 ring-blue-400/20'
+                        : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                        <Users className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="text-xs font-bold text-slate-900 block leading-tight">
+                        Equipe de Técnicos
+                      </span>
+                      <p className="text-[10px] text-slate-500">
+                        Cadastro e vínculos de labs
+                      </p>
                     </div>
-                    <span className="text-xs font-bold text-slate-900 block leading-tight">
-                      Equipe de Técnicos
-                    </span>
-                    <p className="text-[10px] text-slate-500">
-                      Cadastro e vínculos de labs
-                    </p>
-                  </div>
-                  {activeTab === 'technicians' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
-                </button>
+                    {activeTab === 'technicians' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                  </button>
+                )}
 
+                {/* Gestão dos Laboratórios: Manutenção, Avisos & Softwares - Visível para Administradores e Técnicos */}
                 <button
                   id="tab-softwares-btn"
                   type="button"
@@ -822,71 +862,76 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                       <Code className="w-3.5 h-3.5" />
                     </div>
                     <span className="text-xs font-bold text-slate-900 block leading-tight">
-                      Gestão de Labs & Softwares
+                      Gestão dos Laboratórios: Manutenção, Avisos & Softwares
                     </span>
                     <p className="text-[10px] text-slate-500">
-                      Cadastrar/editar labs, observações e avisos
+                      Cadastrar/editar labs, manutenção, avisos e softwares instalados
                     </p>
                   </div>
                   {activeTab === 'softwares' && <Check className="w-3.5 h-3.5 text-cyan-600 shrink-0" />}
                 </button>
 
-                <button
-                  id="tab-security-btn"
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('security');
-                    setIsMenuDropdownOpen(false);
-                  }}
-                  className={`p-3 rounded-xl border text-left transition-all flex items-start justify-between gap-2 cursor-pointer ${
-                    activeTab === 'security'
-                      ? 'bg-emerald-50/80 border-emerald-400 ring-2 ring-emerald-400/20'
-                      : 'bg-white border-slate-200 hover:border-emerald-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                      <Shield className="w-3.5 h-3.5" />
+                {/* Segurança & Instituição - Exclusivo para Administrador Geral */}
+                {isSuperAdmin && (
+                  <button
+                    id="tab-security-btn"
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('security');
+                      setIsMenuDropdownOpen(false);
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all flex items-start justify-between gap-2 cursor-pointer ${
+                      activeTab === 'security'
+                        ? 'bg-emerald-50/80 border-emerald-400 ring-2 ring-emerald-400/20'
+                        : 'bg-white border-slate-200 hover:border-emerald-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                        <Shield className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="text-xs font-bold text-slate-900 block leading-tight">
+                        Segurança & Instituição
+                      </span>
+                      <p className="text-[10px] text-slate-500">
+                        Senhas e subtítulo do topo
+                      </p>
                     </div>
-                    <span className="text-xs font-bold text-slate-900 block leading-tight">
-                      Segurança & Instituição
-                    </span>
-                    <p className="text-[10px] text-slate-500">
-                      Senhas e subtítulo do topo
-                    </p>
-                  </div>
-                  {activeTab === 'security' && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
-                </button>
+                    {activeTab === 'security' && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Status do Firebase Firestore para o Administrador */}
-            <div className="pt-3 border-t border-slate-100 bg-slate-50/80 -mx-4 -mb-4 p-3.5 rounded-b-2xl">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                  <span className="font-bold text-slate-800">Status do Banco de Dados:</span>
-                  <span className="text-emerald-700 font-semibold bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px]">
-                    Firebase Firestore Ativo
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                  <span>Sincronização em tempo real ativa</span>
-                  <span>•</span>
-                  <span>Cache offline habilitado</span>
+            {/* Status do Firebase Firestore para o Administrador Geral */}
+            {isSuperAdmin && (
+              <div className="pt-3 border-t border-slate-100 bg-slate-50/80 -mx-4 -mb-4 p-3.5 rounded-b-2xl">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    <span className="font-bold text-slate-800">Status do Banco de Dados:</span>
+                    <span className="text-emerald-700 font-semibold bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px]">
+                      Firebase Firestore Ativo
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                    <span>Sincronização em tempo real ativa</span>
+                    <span>•</span>
+                    <span>Cache offline habilitado</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>
 
       {/* Main Content Area */}
-      {activeTab === 'security' ? (
+      {activeTab === 'security' && isSuperAdmin ? (
         <AdminSecurityPanel />
       ) : activeTab === 'softwares' ? (
         <LabManagementPanel labs={labs} />
-      ) : activeTab === 'technicians' ? (
+      ) : activeTab === 'technicians' && isSuperAdmin ? (
         <TechnicianManagement labs={labs} />
       ) : activeTab === 'calendar' ? (
         <BookingCalendar
