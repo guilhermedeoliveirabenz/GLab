@@ -1,15 +1,20 @@
 import { Booking } from '../types';
 
 /**
- * Utilitários e serviços de alertas de agendamentos:
- * 1. Monitoramento de agendamentos pendentes para Administradores e Técnicos de TI
- * 2. Alertas preventivos de 20 minutos antes do início do agendamento
+ * Utilitários e serviços de alertas e lembretes de agendamentos:
+ * 1. Lembrete preventivo de 1 dia antes do evento (Véspera)
+ * 2. Alerta preventivo de 20 minutos antes do início do evento
+ * 3. Monitoramento de agendamentos pendentes para Administradores e Técnicos de TI
  */
+
+export type AlertReminderTiming = '1_day_before' | '20_min_before';
 
 export interface UpcomingAlertItem {
   booking: Booking;
   minutesLeft: number;
   alertKey: string;
+  timing: AlertReminderTiming;
+  timingLabel: string;
 }
 
 /**
@@ -75,73 +80,131 @@ export function getMinutesUntilBooking(booking: Booking, now: Date = new Date())
   return diffMinutes;
 }
 
+const ACKNOWLEDGED_ALERT_PREFIX = 'gestlab_notified_reminder_';
 const ACKNOWLEDGED_20MIN_KEY_PREFIX = 'gestlab_notified_20min_';
 
 /**
- * Gera uma chave unívoca para o alerta de 20 minutos de um agendamento
+ * Gera chave única para o lembrete de 1 dia antes (véspera)
  */
-export function get20MinAlertKey(booking: Booking): string {
-  const startTime = extractBookingStartTime(booking) || '00:00';
-  return `${booking.id}_${booking.date}_${startTime}`;
+export function get1DayAlertKey(booking: Booking): string {
+  return `${booking.id}_1day_${booking.date}`;
 }
 
 /**
- * Verifica se o alerta de 20min já foi disparado/confirmado pelo usuário
+ * Gera chave única para o alerta de 20 minutos de um agendamento
  */
-export function is20MinAlertAcknowledged(key: string): boolean {
+export function get20MinAlertKey(booking: Booking): string {
+  const startTime = extractBookingStartTime(booking) || '00:00';
+  return `${booking.id}_20min_${booking.date}_${startTime}`;
+}
+
+/**
+ * Verifica se um alerta/lembrete já foi dispensado ou visualizado
+ */
+export function isReminderAcknowledged(key: string): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return sessionStorage.getItem(ACKNOWLEDGED_20MIN_KEY_PREFIX + key) === 'true';
+    return (
+      sessionStorage.getItem(ACKNOWLEDGED_ALERT_PREFIX + key) === 'true' ||
+      localStorage.getItem(ACKNOWLEDGED_ALERT_PREFIX + key) === 'true' ||
+      sessionStorage.getItem(ACKNOWLEDGED_20MIN_KEY_PREFIX + key) === 'true'
+    );
   } catch {
     return false;
   }
 }
 
 /**
- * Marca o alerta de 20min como notificado/ciente para esta sessão
+ * Marca um lembrete como notificado/ciente
  */
-export function mark20MinAlertAcknowledged(key: string): void {
+export function markReminderAcknowledged(key: string): void {
   if (typeof window === 'undefined') return;
   try {
+    sessionStorage.setItem(ACKNOWLEDGED_ALERT_PREFIX + key, 'true');
+    localStorage.setItem(ACKNOWLEDGED_ALERT_PREFIX + key, 'true');
     sessionStorage.setItem(ACKNOWLEDGED_20MIN_KEY_PREFIX + key, 'true');
   } catch (e) {
-    console.warn('Erro ao salvar acknowledged no sessionStorage:', e);
+    console.warn('Erro ao salvar acknowledged:', e);
   }
 }
 
+export const is20MinAlertAcknowledged = isReminderAcknowledged;
+export const mark20MinAlertAcknowledged = markReminderAcknowledged;
+
 /**
- * Localiza todos os agendamentos de hoje que iniciam em 20 minutos ou menos (até 0 min)
- * e que ainda não foram dispensados/reconhecidos
+ * Localiza todos os lembretes preventivos agendados:
+ * 1. Disparado 1 DIA ANTES do evento (véspera do agendamento)
+ * 2. Disparado 20 MINUTOS ANTES do início do evento (no dia do agendamento)
  */
-export function findUpcoming20MinAlerts(
+export function findScheduledBookingReminders(
   bookings: Booking[],
   now: Date = new Date()
 ): UpcomingAlertItem[] {
   const todayStr = getLocalDateStr(now);
+
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const tomorrowStr = getLocalDateStr(tomorrow);
+
   const results: UpcomingAlertItem[] = [];
 
   for (const b of bookings) {
     // Ignora agendamentos cancelados ou rejeitados
     if (b.status === 'cancelled' || b.status === 'rejected') continue;
-    if (b.date !== todayStr) continue;
 
-    const minutesLeft = getMinutesUntilBooking(b, now);
-    if (minutesLeft === null) continue;
+    // 1. DISPARO DE 1 DIA ANTES (Véspera do evento)
+    if (b.date === tomorrowStr) {
+      const startTimeStr = extractBookingStartTime(b) || '07:30';
+      const [h, m] = startTimeStr.split(':').map(Number);
+      const eventStart = new Date(
+        tomorrow.getFullYear(),
+        tomorrow.getMonth(),
+        tomorrow.getDate(),
+        h || 7,
+        m || 0,
+        0,
+        0
+      );
+      const diffMinutes = Math.max(1, Math.floor((eventStart.getTime() - now.getTime()) / 60000));
+      const alertKey = get1DayAlertKey(b);
 
-    // Janela de 20 minutos antes do início (entre 0 e 20 minutos)
-    if (minutesLeft >= 0 && minutesLeft <= 20) {
-      const alertKey = get20MinAlertKey(b);
       results.push({
         booking: b,
-        minutesLeft,
+        timing: '1_day_before',
+        timingLabel: '1 dia antes (Amanhã)',
+        minutesLeft: diffMinutes,
         alertKey,
       });
+      continue;
+    }
+
+    // 2. DISPARO DE 20 MINUTOS ANTES (No dia do evento)
+    if (b.date === todayStr) {
+      const minutesLeft = getMinutesUntilBooking(b, now);
+      if (minutesLeft !== null && minutesLeft >= 0 && minutesLeft <= 20) {
+        const alertKey = get20MinAlertKey(b);
+        results.push({
+          booking: b,
+          timing: '20_min_before',
+          timingLabel: '20 minutos antes',
+          minutesLeft,
+          alertKey,
+        });
+      }
     }
   }
 
-  // Ordena pelos que iniciam mais rápido
-  return results.sort((a, b) => a.minutesLeft - b.minutesLeft);
+  // Ordenação: 20 minutos antes têm prioridade mais urgente (menor minutesLeft), depois os de 1 dia antes
+  return results.sort((a, b) => {
+    if (a.timing === '20_min_before' && b.timing === '1_day_before') return -1;
+    if (a.timing === '1_day_before' && b.timing === '20_min_before') return 1;
+    return a.minutesLeft - b.minutesLeft;
+  });
 }
+
+/**
+ * Mantém compatibilidade com chamadas anteriores de findUpcoming20MinAlerts
+ */
+export const findUpcoming20MinAlerts = findScheduledBookingReminders;
 
 /**
  * Filtra agendamentos pendentes relevantes para o perfil do usuário

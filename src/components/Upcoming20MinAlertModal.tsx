@@ -15,8 +15,14 @@ import {
   ExternalLink,
   ChevronRight,
   ChevronLeft,
+  Volume2,
 } from 'lucide-react';
-import { getWhatsAppSendUrl, generate20MinReminderWhatsAppMessage } from '../lib/whatsapp';
+import {
+  getWhatsAppSendUrl,
+  generate20MinReminderWhatsAppMessage,
+  generate1DayReminderWhatsAppMessage,
+} from '../lib/whatsapp';
+import { playUpcomingBooking20MinReminderSound } from '../lib/soundUtils';
 
 interface Upcoming20MinAlertModalProps {
   alerts: UpcomingAlertItem[];
@@ -34,21 +40,33 @@ export const Upcoming20MinAlertModal: React.FC<Upcoming20MinAlertModalProps> = (
   onNavigateToAdmin,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlayingSound, setIsPlayingSound] = useState(false);
 
   if (alerts.length === 0) return null;
 
   // Garante índice válido
   const activeIndex = Math.min(currentIndex, alerts.length - 1);
   const currentItem = alerts[activeIndex] || alerts[0];
-  const { booking, minutesLeft } = currentItem;
+  const { booking, minutesLeft, timing } = currentItem;
 
+  const isOneDayBefore = timing === '1_day_before';
   const isPending = booking.status === 'pending';
 
   const handleSendWhatsAppReminder = () => {
     if (!booking.whatsapp) return;
-    const msg = generate20MinReminderWhatsAppMessage(booking, Math.max(1, minutesLeft));
+    const msg = isOneDayBefore
+      ? generate1DayReminderWhatsAppMessage(booking)
+      : generate20MinReminderWhatsAppMessage(booking, Math.max(1, minutesLeft));
     const url = getWhatsAppSendUrl(booking.whatsapp, msg);
     window.open(url, '_blank');
+  };
+
+  const handleReplaySound = () => {
+    setIsPlayingSound(true);
+    playUpcomingBooking20MinReminderSound();
+    setTimeout(() => {
+      setIsPlayingSound(false);
+    }, 3100);
   };
 
   const handleDismissCurrent = () => {
@@ -65,22 +83,30 @@ export const Upcoming20MinAlertModal: React.FC<Upcoming20MinAlertModalProps> = (
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs transition-opacity duration-300"
     >
       <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border-2 border-blue-400 overflow-hidden flex flex-col max-h-[92vh] animate-popup-bounce">
-        {/* Top Header com Tema de Urgência e Relógio */}
+        {/* Top Header com Tema Dinâmico para 1 Dia Antes ou 20 Minutos */}
         <div
           className={`p-4 sm:p-5 text-white flex items-start justify-between gap-3 ${
             isPending
               ? 'bg-gradient-to-r from-amber-600 via-orange-600 to-red-600'
-              : 'bg-gradient-to-r from-blue-700 via-indigo-700 to-indigo-900'
+              : isOneDayBefore
+                ? 'bg-gradient-to-r from-purple-700 via-indigo-700 to-slate-900'
+                : 'bg-gradient-to-r from-blue-700 via-indigo-700 to-indigo-900'
           }`}
         >
           <div className="flex items-start gap-3">
             <div className="w-11 h-11 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-white shrink-0 mt-0.5 shadow-inner">
-              <Clock className="w-6 h-6 animate-pulse" />
+              {isOneDayBefore ? (
+                <Calendar className="w-6 h-6 animate-pulse text-amber-300" />
+              ) : (
+                <Clock className="w-6 h-6 animate-pulse text-yellow-300" />
+              )}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="inline-flex items-center gap-1 text-[11px] font-extrabold uppercase tracking-wider bg-white/25 px-2.5 py-0.5 rounded-full">
-                  ⏰ Alerta Preventivo de Início
+                  {isOneDayBefore
+                    ? '📅 Lembrete de Véspera • 1 Dia Antes'
+                    : '⏰ Alerta Preventivo • 20 Minutos'}
                 </span>
                 {isPending && (
                   <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-yellow-400 text-yellow-950 px-2 py-0.5 rounded-full">
@@ -89,31 +115,49 @@ export const Upcoming20MinAlertModal: React.FC<Upcoming20MinAlertModalProps> = (
                 )}
               </div>
               <h3 className="text-lg sm:text-xl font-extrabold text-white mt-1 leading-snug">
-                {minutesLeft <= 1
-                  ? 'Agendamento Inicia Agora!'
-                  : `Agendamento em ~${minutesLeft} minutos`}
+                {isOneDayBefore
+                  ? `Aula Amanhã: ${booking.labName}`
+                  : minutesLeft <= 1
+                    ? 'Agendamento Inicia Agora!'
+                    : `Agendamento em ~${minutesLeft} minutos`}
               </h3>
               <p className="text-xs text-white/90 mt-0.5">
-                Prepare a liberação da sala, equipamentos e suporte técnico para a aula.
+                {isOneDayBefore
+                  ? 'Lembrete preventivo 1 dia antes da aula: organize o laboratório, softwares e equipamentos.'
+                  : 'Prepare a liberação da sala, equipamentos e suporte técnico para a aula.'}
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleDismissCurrent}
-            title="Fechar / Estou ciente"
-            className="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/15 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={handleReplaySound}
+              title="Ouvir som do alerta (3 segundos)"
+              className={`p-2 rounded-xl transition-all cursor-pointer flex items-center gap-1 text-xs font-bold text-white ${
+                isPlayingSound ? 'bg-white/30 ring-2 ring-white/60 animate-pulse' : 'bg-white/15 hover:bg-white/25'
+              }`}
+            >
+              <Volume2 className={`w-4 h-4 ${isPlayingSound ? 'animate-bounce' : ''}`} />
+              <span className="hidden sm:inline">{isPlayingSound ? '3s...' : 'Som'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleDismissCurrent}
+              title="Fechar / Estou ciente"
+              className="text-white/80 hover:text-white p-2 rounded-xl hover:bg-white/15 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Paginação se houver múltiplos alertas simultâneos */}
         {alerts.length > 1 && (
           <div className="bg-slate-100 border-b border-slate-200 px-4 py-2 flex items-center justify-between text-xs">
             <span className="font-semibold text-slate-700">
-              Alerta <strong>{activeIndex + 1}</strong> de <strong>{alerts.length}</strong> acontecendo em breve
+              Lembrete <strong>{activeIndex + 1}</strong> de <strong>{alerts.length}</strong> (
+              {currentItem.timingLabel || (isOneDayBefore ? '1 dia antes' : '20 min antes')})
             </span>
             <div className="flex items-center gap-1">
               <button
@@ -148,7 +192,11 @@ export const Upcoming20MinAlertModal: React.FC<Upcoming20MinAlertModalProps> = (
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                   {booking.isMobileLab ? 'Laboratório Móvel (Carrinho)' : 'Laboratório Fixo'}
                 </span>
-                <span className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-md border ${
+                  isOneDayBefore
+                    ? 'text-purple-700 bg-purple-50 border-purple-200'
+                    : 'text-blue-700 bg-blue-50 border-blue-200'
+                }`}>
                   ⏰ {booking.timeSlot}
                 </span>
               </div>
@@ -193,7 +241,9 @@ export const Upcoming20MinAlertModal: React.FC<Upcoming20MinAlertModalProps> = (
           <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-xs space-y-1.5">
             <div className="flex items-center justify-between text-slate-600">
               <span>📅 Data da Aula:</span>
-              <strong className="text-slate-900">{booking.date}</strong>
+              <strong className={`font-bold ${isOneDayBefore ? 'text-purple-900' : 'text-slate-900'}`}>
+                {booking.date} {isOneDayBefore ? '(Amanhã)' : '(Hoje)'}
+              </strong>
             </div>
             {booking.requestedMachines && (
               <div className="flex items-center justify-between text-slate-600">
@@ -211,22 +261,41 @@ export const Upcoming20MinAlertModal: React.FC<Upcoming20MinAlertModalProps> = (
             )}
           </div>
 
-          {/* Checklist de Preparação Rápida */}
-          <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3 text-xs text-blue-950 space-y-1">
-            <span className="font-bold flex items-center gap-1.5 text-blue-900">
-              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-              Checklist de Suporte Técnico (20min):
-            </span>
-            <ul className="list-disc list-inside space-y-0.5 text-[11px] text-blue-800 ml-1">
-              <li>Destrancar e ventilar o laboratório / ligar ar condicionado</li>
-              <li>Ligar energia elétrica e checar sinal de rede/internet</li>
-              {booking.isMobileLab && (
-                <li className="font-semibold text-amber-900">
-                  Transportar o carrinho até a sala <strong>{booking.roomNumber || 'informada'}</strong>
-                </li>
-              )}
-            </ul>
-          </div>
+          {/* Checklist Dinâmico: Véspera (1 Dia Antes) ou Imediato (20 Minutos) */}
+          {isOneDayBefore ? (
+            <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3 text-xs text-purple-950 space-y-1">
+              <span className="font-bold flex items-center gap-1.5 text-purple-900">
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                Checklist Preventivo de Véspera (1 Dia Antes):
+              </span>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-purple-800 ml-1">
+                <li>Conferir e validar softwares ou arquivos solicitados para a aula</li>
+                <li>Verificar integridade dos computadores e acesso à internet</li>
+                {booking.isMobileLab && (
+                  <li className="font-semibold text-amber-900">
+                    Carregar a bateria dos notebooks do carrinho móvel para entrega na <strong>SALA {booking.roomNumber || 'informada'}</strong>
+                  </li>
+                )}
+                <li>Confirmar alinhamento com o docente caso haja necessidades especiais</li>
+              </ul>
+            </div>
+          ) : (
+            <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3 text-xs text-blue-950 space-y-1">
+              <span className="font-bold flex items-center gap-1.5 text-blue-900">
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                Checklist de Suporte Técnico Imediato (20min):
+              </span>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-blue-800 ml-1">
+                <li>Destrancar e ventilar o laboratório / ligar ar condicionado</li>
+                <li>Ligar energia elétrica e checar sinal de rede/internet</li>
+                {booking.isMobileLab && (
+                  <li className="font-semibold text-amber-900">
+                    Transportar o carrinho até a sala <strong>{booking.roomNumber || 'informada'}</strong>
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
         </div>
 
         {/* Footer com Ações */}
@@ -236,11 +305,11 @@ export const Upcoming20MinAlertModal: React.FC<Upcoming20MinAlertModalProps> = (
               <button
                 type="button"
                 onClick={handleSendWhatsAppReminder}
-                title="Abrir WhatsApp com lembrete para o professor"
+                title={isOneDayBefore ? 'Enviar lembrete de 1 dia antes pelo WhatsApp' : 'Enviar lembrete de 20 minutos pelo WhatsApp'}
                 className="flex-1 sm:flex-initial px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <MessageCircle className="w-4 h-4" />
-                <span>Avisar Professor</span>
+                <span>{isOneDayBefore ? 'Avisar Professor (1 Dia Antes)' : 'Avisar Professor (20min)'}</span>
               </button>
             )}
 

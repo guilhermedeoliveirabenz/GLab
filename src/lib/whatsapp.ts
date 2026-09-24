@@ -194,11 +194,36 @@ export function generate20MinReminderWhatsAppMessage(booking: Booking, minutesLe
     `Olá, *Prof. ${booking.teacherName}*!`,
     `Seu agendamento para o *${booking.labName}* começará em cerca de *${minutesLeft} minutos* (${booking.timeSlot}).`,
     ...(booking.isMobileLab && booking.roomNumber
-      ? [`🚚 *Carrinho Móvel:* Estamos preparando os notebooks para entrega na *Sala ${booking.roomNumber}*`]
+      ? [`🚚 *Carrinho Móvel:* Estamos preparando os notebooks para entrega na *Sala ${booking.roomNumber.toUpperCase()}*`]
       : [`🖥️ O laboratório já está sendo preparado e liberado para a turma *${booking.classGroup}*.`]),
     ``,
     `Tenha uma excelente aula!`,
     `Equipe de TI e Suporte a Laboratórios 🖥️`,
+  ].join('\n');
+}
+
+/**
+ * Mensagem preventiva de lembrete 1 dia antes da aula agendada (Véspera)
+ */
+export function generate1DayReminderWhatsAppMessage(booking: Booking): string {
+  const formattedDate = formatDateBR(booking.date);
+  return [
+    `*LEMBRETE PREVENTIVO DE AULA - GESTLAB* 🏫📅`,
+    ``,
+    `Olá, *Prof. ${booking.teacherName}*!`,
+    `Lembramos que *amanhã* (*${formattedDate}*) você tem aula agendada no *${booking.labName}*:`,
+    ``,
+    `⏰ *Horário:* ${booking.timeSlot}`,
+    `👥 *Turma:* ${booking.classGroup}`,
+    ...(booking.subject ? [`📚 *Componente:* ${booking.subject}`] : []),
+    ...(booking.requestedMachines ? [`💻 *Máquinas Solicitadas:* ${booking.requestedMachines} computadores`] : []),
+    ...(booking.isMobileLab && booking.roomNumber
+      ? [``, `🚚 *Carrinho Móvel:* A entrega dos notebooks será feita na *Sala ${booking.roomNumber.toUpperCase()}*.`]
+      : [``, `🖥️ O laboratório já está reservado e estará liberado para sua atividade.`]),
+    ...(booking.notes ? [``, `📝 *Observações anotadas:* "${booking.notes}"`] : []),
+    ``,
+    `Caso precise de algum software específico ou alteração, por favor nos avise.`,
+    `Tenha um ótimo dia e uma excelente aula amanhã! 🎓💻`,
   ].join('\n');
 }
 

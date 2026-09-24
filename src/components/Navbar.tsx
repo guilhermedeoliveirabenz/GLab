@@ -355,49 +355,66 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
 
                     <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-100 p-1">
-                      {/* Seção 1: Alertas Preventivos 20 Minutos */}
+                      {/* Seção 1: Lembretes Preventivos: 1 Dia Antes e 20 Minutos */}
                       {upcomingAlerts.length > 0 && (
                         <div className="p-3 bg-blue-50/60 rounded-xl m-1 border border-blue-200">
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-[11px] font-extrabold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
                               <Clock className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
-                              Alertas 20 Minutos ({upcomingAlerts.length})
+                              Lembretes Preventivos ({upcomingAlerts.length})
                             </span>
-                            <span className="text-[10px] bg-blue-200 text-blue-800 font-bold px-1.5 py-0.5 rounded">
-                              Hoje
+                            <span className="text-[10px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded-full">
+                              1 dia & 20 min
                             </span>
                           </div>
                           <div className="space-y-1.5">
-                            {upcomingAlerts.map((item) => (
-                              <div
-                                key={item.alertKey}
-                                className="bg-white p-2.5 rounded-lg border border-blue-100 shadow-2xs flex items-center justify-between gap-2"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-xs font-bold text-slate-900 truncate">
-                                      {item.booking.labName}
-                                    </span>
-                                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                                      inicia em ~{item.minutesLeft}m
-                                    </span>
-                                  </div>
-                                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                                    Prof. {item.booking.teacherName} • {item.booking.timeSlot}
-                                  </p>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsNotifDropdownOpen(false);
-                                    onOpenUpcomingAlert?.(item);
-                                  }}
-                                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-lg shrink-0 transition-colors cursor-pointer"
+                            {upcomingAlerts.map((item) => {
+                              const is1Day = item.timing === '1_day_before';
+                              return (
+                                <div
+                                  key={item.alertKey}
+                                  className={`p-2.5 rounded-lg border shadow-2xs flex items-center justify-between gap-2 ${
+                                    is1Day
+                                      ? 'bg-purple-50/70 border-purple-200'
+                                      : 'bg-white border-blue-100'
+                                  }`}
                                 >
-                                  Ver
-                                </button>
-                              </div>
-                            ))}
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-xs font-bold text-slate-900 truncate">
+                                        {item.booking.labName}
+                                      </span>
+                                      {is1Day ? (
+                                        <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
+                                          📅 Amanhã (1 dia antes)
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                          ⏰ Hoje em ~{item.minutesLeft}m
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                                      Prof. {item.booking.teacherName} • {item.booking.timeSlot}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsNotifDropdownOpen(false);
+                                      onOpenUpcomingAlert?.(item);
+                                    }}
+                                    className={`px-2.5 py-1 text-white text-[11px] font-bold rounded-lg shrink-0 transition-colors cursor-pointer ${
+                                      is1Day
+                                        ? 'bg-purple-600 hover:bg-purple-700'
+                                        : 'bg-blue-600 hover:bg-blue-700'
+                                    }`}
+                                  >
+                                    Ver
+                                  </button>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -497,10 +514,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                           playUpcomingBooking20MinReminderSound();
                         }}
                         className="text-[11px] text-slate-600 hover:text-slate-900 font-semibold flex items-center gap-1 p-1 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
-                        title="Toca o efeito sonoro de aviso de 20 minutos"
+                        title="Toca o efeito sonoro de 3 segundos dos lembretes e alertas"
                       >
                         <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Testar Alarme (20min)</span>
+                        <span>Testar Alarme (Som 3s)</span>
                       </button>
 
                       <button

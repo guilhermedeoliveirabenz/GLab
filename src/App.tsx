@@ -96,20 +96,20 @@ function AppContent() {
     }
   }, [isAdmin, pendingCount, user]);
 
-  // Monitoramento contínuo em tempo real para alerta de 20 minutos antes do início do agendamento
+  // Monitoramento contínuo em tempo real para lembretes: 1 dia antes e 20 minutos antes do evento
   useEffect(() => {
     const checkUpcomingAlerts = () => {
       const now = new Date();
       const upcoming = findUpcoming20MinAlerts(bookings, now);
       setUpcoming20MinAlerts(upcoming);
 
-      // Identifica itens dentro da janela de 20 minutos que ainda não foram apresentados nesta sessão
+      // Identifica itens dentro da janela (1 dia antes ou 20 min antes) que ainda não foram apresentados
       const unacknowledged = upcoming.filter((item) => !is20MinAlertAcknowledged(item.alertKey));
       if (unacknowledged.length > 0) {
-        // Marca como notificado no storage da sessão para não ficar repetindo a cada ciclo do timer
+        // Marca como notificado no storage para evitar repetições contínuas
         unacknowledged.forEach((u) => mark20MinAlertAcknowledged(u.alertKey));
 
-        // Reproduz o alarme preventivo suave de 20 minutos
+        // Reproduz o alarme suave de 3 segundos
         playUpcomingBooking20MinReminderSound();
 
         // Enfileira para exibição do modal de alerta
@@ -126,12 +126,20 @@ function AppContent() {
             const labNote = first.booking.isMobileLab && first.booking.roomNumber
               ? ` (Carrinho na Sala ${first.booking.roomNumber})`
               : '';
-            new Notification('⏰ GestLab: Agendamento em 20 Minutos!', {
-              body: `Aula de ${first.booking.teacherName} no ${first.booking.labName} inicia às ${first.booking.timeSlot}${labNote}`,
+            const is1Day = first.timing === '1_day_before';
+            const title = is1Day
+              ? '📅 GestLab: Lembrete de Aula Amanhã (1 dia antes)'
+              : '⏰ GestLab: Agendamento em 20 Minutos!';
+            const body = is1Day
+              ? `Aula de ${first.booking.teacherName} no ${first.booking.labName} amanhã às ${first.booking.timeSlot}${labNote}`
+              : `Aula de ${first.booking.teacherName} no ${first.booking.labName} inicia às ${first.booking.timeSlot}${labNote}`;
+
+            new Notification(title, {
+              body,
               icon: '/icon.svg',
             });
           } catch (e) {
-            console.warn('Erro ao disparar Web Notification de 20 minutos:', e);
+            console.warn('Erro ao disparar Web Notification de lembrete:', e);
           }
         }
       }
