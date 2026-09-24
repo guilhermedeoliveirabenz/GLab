@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, LAB_LIST, Lab, EducationLevel, ShiftType } from '../types';
 import { EducationBadge } from './EducationBadge';
+import { AdjustBookingDateModal } from './AdjustBookingDateModal';
 import { formatDateBR } from '../lib/whatsapp';
 import { useAuth } from '../lib/authContext';
 import {
@@ -194,6 +195,7 @@ interface BookingCalendarProps {
   onSelectBooking?: (booking: Booking) => void;
   onRequestNewBooking?: (date: string, shift?: ShiftType, labId?: string) => void;
   onOpenBatchImport?: () => void;
+  onAdjustBookingDate?: (booking: Booking) => void;
 }
 
 type CalendarViewMode = 'day' | 'week' | 'month';
@@ -205,6 +207,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   onSelectBooking,
   onRequestNewBooking,
   onOpenBatchImport,
+  onAdjustBookingDate,
 }) => {
   const { isAdmin: authIsAdmin } = useAuth();
   const isAdmin = propIsAdmin !== undefined ? propIsAdmin : authIsAdmin;
@@ -223,6 +226,8 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   const [dayExpandedModal, setDayExpandedModal] = useState<{ dateStr: string; dayName: string } | null>(null);
   const [activeBookingModal, setActiveBookingModal] = useState<Booking | null>(null);
   const [selectedMaintenanceLabModal, setSelectedMaintenanceLabModal] = useState<Lab | null>(null);
+  const [bookingToAdjust, setBookingToAdjust] = useState<Booking | null>(null);
+  const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
   const [isMobileFilterExpanded, setIsMobileFilterExpanded] = useState<boolean>(false);
   const [selectedMobileDate, setSelectedMobileDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
@@ -2100,11 +2105,31 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
                 )}
               </div>
 
-              <div className="pt-4 flex justify-end">
+              <div className="pt-4 flex items-center justify-between gap-2 border-t border-slate-100">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const b = activeBookingModal;
+                      setActiveBookingModal(null);
+                      if (onAdjustBookingDate) {
+                        onAdjustBookingDate(b);
+                      } else {
+                        setBookingToAdjust(b);
+                        setIsAdjustModalOpen(true);
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs text-xs"
+                    title="Ajustar data ou horário do agendamento (Exclusivo Administrador e Técnico)"
+                  >
+                    <CalendarClock className="w-4 h-4 text-blue-600" />
+                    <span>Ajustar Data</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setActiveBookingModal(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors cursor-pointer"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors cursor-pointer ml-auto"
                 >
                   Fechar
                 </button>
@@ -2419,6 +2444,17 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
           </div>
         );
       })()}
+      {/* Modal de Ajuste de Data (Administrador e Técnico) */}
+      <AdjustBookingDateModal
+        booking={bookingToAdjust}
+        isOpen={isAdjustModalOpen}
+        onClose={() => {
+          setIsAdjustModalOpen(false);
+          setBookingToAdjust(null);
+        }}
+        existingBookings={bookings}
+        labs={labs}
+      />
     </div>
   );
 };

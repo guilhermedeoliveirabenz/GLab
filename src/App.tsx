@@ -16,11 +16,13 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { Upcoming20MinAlertModal } from './components/Upcoming20MinAlertModal';
 import { PendingBookingsNotification } from './components/PendingBookingsNotification';
 import { PendingBookingsModal } from './components/PendingBookingsModal';
+import { AdjustBookingDateModal } from './components/AdjustBookingDateModal';
 import {
   findUpcoming20MinAlerts,
   UpcomingAlertItem,
   is20MinAlertAcknowledged,
   mark20MinAlertAcknowledged,
+  getLocalDateStr,
 } from './lib/bookingAlertService';
 import {
   playNewBookingAlertSound,
@@ -58,6 +60,8 @@ function AppContent() {
   const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
   const [latestNewBookingAlert, setLatestNewBookingAlert] = useState<Booking | null>(null);
   const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
+  const [bookingToAdjustApp, setBookingToAdjustApp] = useState<Booking | null>(null);
+  const [isAdjustDateModalOpenApp, setIsAdjustDateModalOpenApp] = useState(false);
 
   // Alertas preventivos de 20 minutos
   const [upcoming20MinAlerts, setUpcoming20MinAlerts] = useState<UpcomingAlertItem[]>([]);
@@ -68,8 +72,19 @@ function AppContent() {
   const teacherSessionRef = React.useRef(teacherSession);
   const hasNotifiedPendingLoginRef = React.useRef(false);
 
-  // Lista de agendamentos pendentes
-  const pendingBookings = useMemo(() => bookings.filter((b) => b.status === 'pending'), [bookings]);
+  // Lista de agendamentos pendentes ativos (a partir de hoje), ordenados do mais antigo para os mais novos
+  const pendingBookings = useMemo(() => {
+    const today = getLocalDateStr(new Date());
+    return bookings
+      .filter((b) => b.status === 'pending' && b.date >= today)
+      .sort((a, b) => {
+        const dateDiff = a.date.localeCompare(b.date);
+        if (dateDiff !== 0) return dateDiff;
+        const timeA = a.startTime || a.timeSlot || '';
+        const timeB = b.startTime || b.timeSlot || '';
+        return timeA.localeCompare(timeB);
+      });
+  }, [bookings]);
   const pendingCount = pendingBookings.length;
 
   // Notificação sonora, pop-up e boas-vindas para Administrador ou Técnico conectado com pendências
@@ -457,6 +472,10 @@ function AppContent() {
               bookings={bookings}
               labs={labs}
               onOpenBatchImport={isAdmin ? () => setIsBatchImportOpen(true) : undefined}
+              onAdjustBookingDate={(b) => {
+                setBookingToAdjustApp(b);
+                setIsAdjustDateModalOpenApp(true);
+              }}
               onRequestNewBooking={(date, shift, labId) => {
                 userManuallyNavigatedRef.current = true;
                 setPreselectedDate(date);
@@ -576,6 +595,10 @@ function AppContent() {
         <PendingBookingsModal
           pendingBookings={pendingBookings}
           onClose={() => setIsPendingModalOpen(false)}
+          onAdjustBookingDate={(b) => {
+            setBookingToAdjustApp(b);
+            setIsAdjustDateModalOpenApp(true);
+          }}
           onReviewInAdmin={() => {
             userManuallyNavigatedRef.current = true;
             setAdminSubTab('pending');
@@ -585,6 +608,18 @@ function AppContent() {
           }}
         />
       )}
+
+      {/* Modal de Ajuste de Data (Administrador e Técnico) */}
+      <AdjustBookingDateModal
+        booking={bookingToAdjustApp}
+        isOpen={isAdjustDateModalOpenApp}
+        onClose={() => {
+          setIsAdjustDateModalOpenApp(false);
+          setBookingToAdjustApp(null);
+        }}
+        existingBookings={bookings}
+        labs={labs}
+      />
 
       {/* Modal de Importação de Agendamentos por Lote (Exclusivo TI/Admin) */}
       <BatchImportModal

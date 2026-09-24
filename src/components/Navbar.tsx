@@ -239,7 +239,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Monitor className="w-4 h-4" />
-              <span>Laboratórios (12)</span>
+              <span>Laboratórios</span>
             </button>
 
             <button

@@ -227,3 +227,58 @@ export function generate1DayReminderWhatsAppMessage(booking: Booking): string {
   ].join('\n');
 }
 
+/**
+ * Gera mensagem de notificação quando a data/horário de um agendamento é ajustada
+ */
+export function generateDateAdjustmentWhatsAppMessage(
+  booking: Booking,
+  previousDate: string,
+  newDate: string,
+  newTimeSlot?: string,
+  reason?: string,
+  adjustedByName?: string,
+): string {
+  const oldFormattedDate = formatDateBR(previousDate);
+  const newFormattedDate = formatDateBR(newDate);
+
+  const rawTeacher = booking.teacherName?.trim();
+  const cleanTeacher = rawTeacher ? rawTeacher.replace(/^Prof\.?\s*/i, '').trim() : 'Professor(a)';
+  const teacherName = cleanTeacher || 'Professor(a)';
+
+  const lines = [
+    `*AVISO: AJUSTE NA DATA DO AGENDAMENTO* 🏫📅`,
+    ``,
+    `Olá, *Prof. ${teacherName}*!`,
+    `Informamos que o seu agendamento no laboratório *${booking.labName}* teve a sua data ajustada no sistema GestLab.`,
+    ``,
+    `📋 *INFORMAÇÕES ATUALIZADAS:*`,
+    `🖥️ *Laboratório:* ${booking.labName}`,
+    `👥 *Turma:* ${booking.classGroup}`,
+    ...(booking.subject ? [`📚 *Disciplina:* ${booking.subject}`] : []),
+    `📅 *Data Anterior:* ${oldFormattedDate}`,
+    `✨ *NOVA DATA DEFINIDA:* *${newFormattedDate}*`,
+    `⏰ *Horário:* ${newTimeSlot || booking.timeSlot}`,
+  ];
+
+  if (booking.isMobileLab && booking.roomNumber) {
+    lines.push(`🚚 *Entrega do Carrinho:* Sala ${booking.roomNumber.toUpperCase()}`);
+  }
+
+  if (reason && reason.trim()) {
+    lines.push(``, `📌 *Motivo / Justificativa:* ${reason.trim()}`);
+  }
+
+  if (adjustedByName) {
+    lines.push(`👤 *Ajustado por:* ${adjustedByName}`);
+  }
+
+  lines.push(
+    ``,
+    `Se tiver qualquer dúvida ou se precisar de outro remanejamento, por favor nos avise.`,
+    `Atenciosamente,`,
+    `Equipe de Gestão e Suporte de Laboratórios 💻🏫`,
+  );
+
+  return lines.join('\n');
+}
+

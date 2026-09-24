@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Booking } from '../types';
+import { Booking, ShiftType } from '../types';
 
 const COLLECTION_NAME = 'bookings';
 const LOCAL_STORAGE_KEY = 'school_lab_bookings_cache';
@@ -316,6 +316,74 @@ export async function createBatchBookings(
   setLocalCache(updated);
 
   return createdList;
+}
+
+export interface RescheduleBookingParams {
+  date: string;
+  timeSlot?: string;
+  startTime?: string;
+  endTime?: string;
+  shift?: ShiftType;
+  labId?: string;
+  labName?: string;
+  isMobileLab?: boolean;
+  roomNumber?: string;
+  adminNotes?: string;
+  adjustedByName?: string;
+  status?: Booking['status'];
+}
+
+/**
+ * Ajusta a data (e opcionalmente horário/laboratório) de um agendamento existente
+ * Realizado por Administrador ou Técnico com registro de auditoria
+ */
+export async function rescheduleBooking(
+  bookingId: string,
+  params: RescheduleBookingParams,
+): Promise<Booking | null> {
+  const current = getLocalCache();
+  const existing = current.find((b) => b.id === bookingId);
+  const now = Date.now();
+
+  const updates: Partial<Booking> = cleanObjectForFirestore({
+    date: params.date,
+    ...(params.timeSlot ? { timeSlot: params.timeSlot } : {}),
+    ...(params.startTime !== undefined ? { startTime: params.startTime } : {}),
+    ...(params.endTime !== undefined ? { endTime: params.endTime } : {}),
+    ...(params.shift ? { shift: params.shift } : {}),
+    ...(params.labId ? { labId: params.labId } : {}),
+    ...(params.labName ? { labName: params.labName } : {}),
+    ...(params.isMobileLab !== undefined ? { isMobileLab: params.isMobileLab } : {}),
+    ...(params.roomNumber !== undefined ? { roomNumber: params.roomNumber } : {}),
+    ...(params.adminNotes !== undefined ? { adminNotes: params.adminNotes } : {}),
+    ...(params.status ? { status: params.status } : {}),
+    previousDate: existing ? existing.date : undefined,
+    previousTimeSlot: existing ? existing.timeSlot : undefined,
+    dateAdjustedAt: now,
+    dateAdjustedBy: params.adjustedByName || 'Administrador/Técnico',
+    updatedAt: now,
+  });
+
+  if (db) {
+    try {
+      await updateDoc(doc(db, COLLECTION_NAME, bookingId), updates);
+      console.log('Agendamento remarcado com sucesso no Firestore:', bookingId);
+    } catch (err) {
+      console.error('Falha ao remarcar agendamento no Firestore:', err);
+    }
+  }
+
+  let updatedBooking: Booking | null = null;
+  const updatedList = current.map((b) => {
+    if (b.id === bookingId) {
+      updatedBooking = { ...b, ...updates };
+      return updatedBooking;
+    }
+    return b;
+  });
+
+  setLocalCache(updatedList);
+  return updatedBooking;
 }
 
 /**

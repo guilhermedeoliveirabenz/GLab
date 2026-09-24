@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Volume2,
+  CalendarClock,
 } from 'lucide-react';
 import { playPendingAlertSound } from '../lib/soundUtils';
 
@@ -21,12 +22,15 @@ interface PendingBookingsModalProps {
   onClose: () => void;
   onReviewInAdmin: () => void;
   onSelectBooking?: (booking: Booking) => void;
+  onAdjustBookingDate?: (booking: Booking) => void;
 }
 
 export const PendingBookingsModal: React.FC<PendingBookingsModalProps> = ({
   pendingBookings,
   onClose,
   onReviewInAdmin,
+  onSelectBooking,
+  onAdjustBookingDate,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlayingSound, setIsPlayingSound] = useState(false);
@@ -207,7 +211,7 @@ export const PendingBookingsModal: React.FC<PendingBookingsModalProps> = ({
         </div>
 
         {/* Footer com Ações */}
-        <div className="bg-slate-50 border-t border-slate-200 p-3 sm:p-4 flex items-center justify-between gap-2.5">
+        <div className="bg-slate-50 border-t border-slate-200 p-3 sm:p-4 flex items-center justify-between gap-2.5 flex-wrap">
           <button
             type="button"
             onClick={onClose}
@@ -216,17 +220,35 @@ export const PendingBookingsModal: React.FC<PendingBookingsModalProps> = ({
             Lembrar Mais Tarde
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              onClose();
-              onReviewInAdmin();
-            }}
-            className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
-          >
-            <span>Abrir e Aprovar no Painel</span>
-            <ExternalLink className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onAdjustBookingDate && (
+              <button
+                type="button"
+                onClick={() => {
+                  const b = currentBooking;
+                  onClose();
+                  onAdjustBookingDate(b);
+                }}
+                className="px-3.5 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Ajustar ou remarcar a data deste agendamento pendente"
+              >
+                <CalendarClock className="w-4 h-4 text-blue-600" />
+                <span>Ajustar Data</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onReviewInAdmin();
+              }}
+              className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Abrir no Painel</span>
+              <ExternalLink className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

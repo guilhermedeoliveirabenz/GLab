@@ -123,6 +123,11 @@ export interface Booking {
   recurrenceFrequency?: RecurrenceType;
   recurrenceTotalCount?: number;
   recurrenceIndex?: number;
+  previousDate?: string; // Data antes do último ajuste
+  previousTimeSlot?: string; // Horário antes do último ajuste
+  dateAdjustedAt?: number; // Timestamp de quando a data foi alterada
+  dateAdjustedBy?: string; // Nome e cargo de quem ajustou a data (Admin ou Técnico)
+  updatedAt?: number;
 }
 
 export interface Technician {

@@ -34,8 +34,16 @@ import {
   Layers,
   ChevronRight,
   FileDown,
+  CalendarClock,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  History,
+  Sparkles,
 } from 'lucide-react';
+import { getLocalDateStr } from '../lib/bookingAlertService';
 import { WhatsAppModal } from './WhatsAppModal';
+import { AdjustBookingDateModal } from './AdjustBookingDateModal';
 import { BatchImportModal } from './BatchImportModal';
 import { TechnicianManagement } from './TechnicianManagement';
 import { BookingCalendar } from './BookingCalendar';
@@ -56,7 +64,21 @@ interface AdminPanelProps {
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIST, initialSubTab }) => {
   const { isSuperAdmin, user } = useAuth();
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateStr(new Date());
+
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrowStr = getLocalDateStr(tomorrowDate);
+
+  const next7DaysDate = new Date();
+  next7DaysDate.setDate(next7DaysDate.getDate() + 7);
+  const next7DaysStr = getLocalDateStr(next7DaysDate);
+
+  // Escopo de Datas e Ordenação Cronológica (do mais antigo para os mais novos)
+  // 'upcoming' (padrão): Exibe do mais antigo para o mais novo e somem automaticamente conforme o dia passa
+  const [dateFilterScope, setDateFilterScope] = useState<'upcoming' | 'today' | 'tomorrow' | 'week' | 'past' | 'all'>('upcoming');
+  const [hidePastBookings, setHidePastBookings] = useState(true);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // Tab inicial segura considerando privilégios de Administrador vs Técnico
   const getInitialSafeTab = () => {
@@ -123,10 +145,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
   const [activeWhatsAppBooking, setActiveWhatsAppBooking] = useState<Booking | null>(null);
   const [isWhatsAppOpen, setIsWhatsAppOpen] = useState(false);
 
+  // Modal de Ajustar Data (Admin e Técnico)
+  const [activeAdjustBooking, setActiveAdjustBooking] = useState<Booking | null>(null);
+  const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
+
   // Stats
+  const activePendingCount = bookings.filter((b) => b.status === 'pending' && b.date >= todayStr).length;
+  const pastPendingCount = bookings.filter((b) => b.status === 'pending' && b.date < todayStr).length;
   const pendingCount = bookings.filter((b) => b.status === 'pending').length;
   const confirmedCount = bookings.filter((b) => b.status === 'confirmed').length;
   const todayBookingsCount = bookings.filter((b) => b.date === todayStr).length;
+  const tomorrowBookingsCount = bookings.filter((b) => b.date === tomorrowStr).length;
+  const pastBookingsCount = bookings.filter((b) => b.date < todayStr).length;
   const mobileBookingsCount = bookings.filter((b) => b.isMobileLab && b.status !== 'cancelled').length;
   const whatsAppSentCount = bookings.filter((b) => b.whatsappSent).length;
 
@@ -136,37 +166,77 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
       ? user.assignedLabIds
       : null;
 
-  // Filtragem
-  const filteredBookings = bookings.filter((b) => {
-    // Se o técnico tem laboratórios específicos vinculados e está no modo "all", restringe aos seus laboratórios
-    if (userAssignedLabs && selectedLabId === 'all') {
-      if (!userAssignedLabs.includes(b.labId)) return false;
-    }
+  // Filtragem e Ordenação Cronológica (do mais antigo para os mais novos)
+  // Conforme o dia passa, agendamentos encerrados somem automaticamente da visão ativa padrão
+  const filteredBookings = bookings
+    .filter((b) => {
+      // Se o técnico tem laboratórios específicos vinculados e está no modo "all", restringe aos seus laboratórios
+      if (userAssignedLabs && selectedLabId === 'all') {
+        if (!userAssignedLabs.includes(b.labId)) return false;
+      }
 
-    // Tab filtering
-    if (activeTab === 'pending' && b.status !== 'pending') return false;
-    if (activeTab === 'mobile_route' && !b.isMobileLab) return false;
+      // Tab filtering
+      if (activeTab === 'pending' && b.status !== 'pending') return false;
+      if (activeTab === 'mobile_route' && !b.isMobileLab) return false;
 
-    // Filters
-    if (selectedStatus !== 'all' && b.status !== selectedStatus) return false;
-    if (selectedLabId !== 'all' && b.labId !== selectedLabId) return false;
-    if (selectedDate && b.date !== selectedDate) return false;
-    if (selectedEduLevel !== 'all' && (b.educationLevel || 'outros') !== selectedEduLevel) return false;
+      // Se uma data específica foi selecionada manualmente no input de data, prevalece essa data
+      if (selectedDate) {
+        if (b.date !== selectedDate) return false;
+      } else {
+        // Escopo de datas dinâmico:
+        // 'upcoming' (padrão): Exibe a partir de hoje até o futuro. Conforme os dias passam, agendamentos passados somem automaticamente!
+        if (dateFilterScope === 'upcoming') {
+          if (b.date < todayStr) return false;
+        } else if (dateFilterScope === 'today') {
+          if (b.date !== todayStr) return false;
+        } else if (dateFilterScope === 'tomorrow') {
+          if (b.date !== tomorrowStr) return false;
+        } else if (dateFilterScope === 'week') {
+          if (b.date < todayStr || b.date > next7DaysStr) return false;
+        } else if (dateFilterScope === 'past') {
+          if (b.date >= todayStr) return false;
+        } else if (dateFilterScope === 'all') {
+          if (hidePastBookings && b.date < todayStr) return false;
+        }
+      }
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const phoneDigits = searchQuery.replace(/\D/g, '');
-      const matchName = b.teacherName.toLowerCase().includes(q);
-      const matchClass = b.classGroup.toLowerCase().includes(q);
-      const matchLab = b.labName.toLowerCase().includes(q);
-      const matchRoom = b.roomNumber?.toLowerCase().includes(q) || false;
-      const matchEdu = b.educationLevel?.toLowerCase().includes(q) || false;
-      const matchPhone = phoneDigits ? b.whatsapp.replace(/\D/g, '').includes(phoneDigits) : false;
-      return matchName || matchClass || matchLab || matchRoom || matchEdu || matchPhone;
-    }
+      // Filters
+      if (selectedStatus !== 'all' && b.status !== selectedStatus) return false;
+      if (selectedLabId !== 'all' && b.labId !== selectedLabId) return false;
+      if (selectedEduLevel !== 'all' && (b.educationLevel || 'outros') !== selectedEduLevel) return false;
 
-    return true;
-  });
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const phoneDigits = searchQuery.replace(/\D/g, '');
+        const matchName = b.teacherName.toLowerCase().includes(q);
+        const matchClass = b.classGroup.toLowerCase().includes(q);
+        const matchLab = b.labName.toLowerCase().includes(q);
+        const matchRoom = b.roomNumber?.toLowerCase().includes(q) || false;
+        const matchEdu = b.educationLevel?.toLowerCase().includes(q) || false;
+        const matchPhone = phoneDigits ? b.whatsapp.replace(/\D/g, '').includes(phoneDigits) : false;
+        return matchName || matchClass || matchLab || matchRoom || matchEdu || matchPhone;
+      }
+
+      return true;
+    })
+    .sort((a, b) => {
+      // 1. Data do agendamento (do mais antigo para os mais novos -> ordem cronológica crescente)
+      const dateDiff = a.date.localeCompare(b.date);
+      if (dateDiff !== 0) {
+        return sortOrder === 'asc' ? dateDiff : -dateDiff;
+      }
+
+      // 2. Horário da aula no mesmo dia (mais cedo primeiro)
+      const timeA = a.startTime || a.timeSlot || '';
+      const timeB = b.startTime || b.timeSlot || '';
+      const timeDiff = timeA.localeCompare(timeB);
+      if (timeDiff !== 0) {
+        return sortOrder === 'asc' ? timeDiff : -timeDiff;
+      }
+
+      // 3. Laboratório / Professor como desempate
+      return a.labName.localeCompare(b.labName);
+    });
 
   const handleOpenWhatsAppModal = (booking: Booking) => {
     setActiveWhatsAppBooking(booking);
@@ -231,6 +301,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
           setActiveWhatsAppBooking(null);
         }}
         onConfirmAndSend={handleConfirmAndSendWhatsApp}
+      />
+
+      {/* Modal de Ajuste de Data (Administrador e Técnico) */}
+      <AdjustBookingDateModal
+        booking={activeAdjustBooking}
+        isOpen={isAdjustModalOpen}
+        onClose={() => {
+          setIsAdjustModalOpen(false);
+          setActiveAdjustBooking(null);
+        }}
+        existingBookings={bookings}
+        labs={labs}
       />
 
       {/* Modal de Importação por Lote (Planilhas / Grade) */}
@@ -306,7 +388,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
       {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
         <div
-          onClick={() => setActiveTab('pending')}
+          onClick={() => {
+            setActiveTab('pending');
+            setDateFilterScope('upcoming');
+            setSelectedDate('');
+          }}
           className={`p-4 rounded-xl border cursor-pointer transition-all ${
             activeTab === 'pending'
               ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/20 shadow-xs'
@@ -314,17 +400,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-700">Pendentes</span>
+            <span className="text-xs font-semibold text-slate-700">Pendentes Ativos</span>
             <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
           </div>
-          <p className="text-2xl font-bold text-amber-700 mt-1">{pendingCount}</p>
-          <p className="text-[11px] text-slate-600 mt-0.5">Aguardando aprovação</p>
+          <p className="text-2xl font-bold text-amber-700 mt-1">{activePendingCount}</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">
+            {pastPendingCount > 0 ? `${activePendingCount} ativos (${pastPendingCount} no passado)` : 'Aguardando aprovação'}
+          </p>
         </div>
 
         <div
-          onClick={() => setActiveTab('all')}
+          onClick={() => {
+            setActiveTab('all');
+            setDateFilterScope('upcoming');
+            setSelectedDate('');
+          }}
           className={`p-4 rounded-xl border cursor-pointer transition-all ${
-            activeTab === 'all'
+            activeTab === 'all' && dateFilterScope !== 'today'
               ? 'bg-blue-500/10 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
               : 'bg-white border-slate-200 hover:border-slate-300'
           }`}
@@ -337,9 +429,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
         <div
           onClick={() => {
             setActiveTab('all');
-            setSelectedDate(todayStr);
+            setDateFilterScope('today');
+            setSelectedDate('');
           }}
-          className="bg-white p-4 rounded-xl border border-slate-200 cursor-pointer hover:border-slate-300 transition-all"
+          className={`p-4 rounded-xl border cursor-pointer transition-all ${
+            activeTab === 'all' && dateFilterScope === 'today' && !selectedDate
+              ? 'bg-blue-500/10 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}
         >
           <span className="text-xs font-semibold text-slate-700">Aulas Hoje</span>
           <p className="text-2xl font-bold text-slate-900 mt-1">{todayBookingsCount}</p>
@@ -437,7 +534,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                     {activeTab === 'pending' && 'Aguardando Aprovação'}
                     {activeTab === 'all' && 'Todos os Agendamentos'}
                     {activeTab === 'calendar' && 'Calendário (Dia / Semana / Mês)'}
-                    {activeTab === 'schedule' && `Grade Diária (${labs.length} Labs)`}
+                    {activeTab === 'schedule' && 'Grade Diária'}
                     {activeTab === 'mobile_route' && 'Roteiro de Carrinhos Móveis'}
                     {activeTab === 'technicians' && 'Equipe de Técnicos'}
                     {activeTab === 'softwares' && 'Gestão dos Laboratórios: Manutenção, Avisos & Softwares'}
@@ -944,6 +1041,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
           bookings={bookings}
           labs={labs}
           onOpenWhatsApp={handleOpenWhatsAppModal}
+          onAdjustDate={(b) => {
+            setActiveAdjustBooking(b);
+            setIsAdjustModalOpen(true);
+          }}
         />
       ) : (
         <div className="space-y-4">
@@ -1038,109 +1139,241 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
           )}
 
           {/* Filters Bar */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
-            {/* Search */}
-            <div className="relative flex-1 min-w-[240px]">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-              <input
-                id="admin-search-bookings"
-                type="text"
-                placeholder="Buscar professor, turma, sala, whatsapp..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+            {/* Barra de Período & Filtro Cronológico Rápido */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 pb-2.5 border-b border-slate-100 text-xs">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+                  Exibição:
+                </span>
 
-            {/* Filter by Lab */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-700 font-medium">Lab:</span>
-              <select
-                id="admin-filter-lab"
-                value={selectedLabId}
-                onChange={(e) => setSelectedLabId(e.target.value)}
-                className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
-              >
-                <option value="all">
-                  {userAssignedLabs ? `Meus Labs Atribuídos (${userAssignedLabs.length})` : `Todos os Labs (${labs.length})`}
-                </option>
-                <optgroup label="Laboratórios Fixos">
-                  {(userAssignedLabs
-                    ? labs.filter((l) => !l.isMobile && userAssignedLabs.includes(l.id))
-                    : labs.filter((l) => !l.isMobile)
-                  ).map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.capacity} máq)
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Laboratórios Móveis">
-                  {(userAssignedLabs
-                    ? labs.filter((l) => l.isMobile && userAssignedLabs.includes(l.id))
-                    : labs.filter((l) => l.isMobile)
-                  ).map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.capacity} máq)
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-            </div>
-
-            {/* Filter by Date */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-700 font-medium">Data:</span>
-              <input
-                id="admin-filter-date"
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-2 py-1 text-xs border border-slate-300 rounded-lg"
-              />
-              {selectedDate && (
+                {/* Padrão Solicitado: Do mais antigo para os mais novos e dias passados somem automaticamente */}
                 <button
-                  onClick={() => setSelectedDate('')}
-                  className="text-[11px] text-slate-500 hover:text-red-600"
+                  type="button"
+                  id="admin-filter-scope-upcoming"
+                  onClick={() => {
+                    setDateFilterScope('upcoming');
+                    setSelectedDate('');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    dateFilterScope === 'upcoming' && !selectedDate
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200/80 border border-slate-200'
+                  }`}
+                  title="Exibe a partir de hoje até datas futuras. Conforme os dias passam, agendamentos encerrados somem automaticamente."
                 >
-                  Limpar
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>A partir de Hoje (Ativos)</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ml-0.5 ${
+                    dateFilterScope === 'upcoming' && !selectedDate ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    Padrão
+                  </span>
                 </button>
-              )}
+
+                <button
+                  type="button"
+                  id="admin-filter-scope-today"
+                  onClick={() => {
+                    setDateFilterScope('today');
+                    setSelectedDate('');
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                    dateFilterScope === 'today' && !selectedDate
+                      ? 'bg-blue-600 text-white shadow-xs font-bold'
+                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <span>Hoje ({todayBookingsCount})</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="admin-filter-scope-tomorrow"
+                  onClick={() => {
+                    setDateFilterScope('tomorrow');
+                    setSelectedDate('');
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                    dateFilterScope === 'tomorrow' && !selectedDate
+                      ? 'bg-blue-600 text-white shadow-xs font-bold'
+                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <span>Amanhã ({tomorrowBookingsCount})</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="admin-filter-scope-week"
+                  onClick={() => {
+                    setDateFilterScope('week');
+                    setSelectedDate('');
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                    dateFilterScope === 'week' && !selectedDate
+                      ? 'bg-blue-600 text-white shadow-xs font-bold'
+                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <span>Próximos 7 Dias</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="admin-filter-scope-past"
+                  onClick={() => {
+                    setDateFilterScope('past');
+                    setSelectedDate('');
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                    dateFilterScope === 'past' && !selectedDate
+                      ? 'bg-slate-800 text-white shadow-xs font-bold'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                  title="Consultar histórico de agendamentos encerrados de dias que já passaram"
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Histórico Passados ({pastBookingsCount})</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="admin-filter-scope-all"
+                  onClick={() => {
+                    setDateFilterScope('all');
+                    setSelectedDate('');
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                    dateFilterScope === 'all' && !selectedDate
+                      ? 'bg-blue-600 text-white shadow-xs font-bold'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <span>Todas as Datas</span>
+                </button>
+              </div>
+
+              {/* Botão de Ordenação Cronológica */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  id="admin-toggle-sort-order"
+                  onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                  className="px-2.5 py-1 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                  title="Alterar ordenação da lista"
+                >
+                  <ArrowUpDown className="w-3 h-3 text-blue-600" />
+                  <span>{sortOrder === 'asc' ? 'Mais Antigo → Mais Novo' : 'Mais Novo → Mais Antigo'}</span>
+                </button>
+              </div>
             </div>
 
-            {/* Filter by Status */}
-            {activeTab === 'all' && (
+            {/* Linha de Busca e Seletores */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* Search */}
+              <div className="relative flex-1 min-w-[240px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  id="admin-search-bookings"
+                  type="text"
+                  placeholder="Buscar professor, turma, sala, whatsapp..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+
+              {/* Filter by Lab */}
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-700 font-medium">Status:</span>
+                <span className="text-xs text-slate-700 font-medium">Lab:</span>
                 <select
-                  id="admin-filter-status"
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  id="admin-filter-lab"
+                  value={selectedLabId}
+                  onChange={(e) => setSelectedLabId(e.target.value)}
                   className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
                 >
-                  <option value="all">Todos os Status</option>
-                  <option value="pending">Pendente</option>
-                  <option value="confirmed">Confirmado</option>
-                  <option value="rejected">Recusado</option>
-                  <option value="cancelled">Cancelado</option>
+                  <option value="all">
+                    {userAssignedLabs ? `Meus Labs Atribuídos (${userAssignedLabs.length})` : `Todos os Labs (${labs.length})`}
+                  </option>
+                  <optgroup label="Laboratórios Fixos">
+                    {(userAssignedLabs
+                      ? labs.filter((l) => !l.isMobile && userAssignedLabs.includes(l.id))
+                      : labs.filter((l) => !l.isMobile)
+                    ).map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} ({l.capacity} máq)
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Laboratórios Móveis">
+                    {(userAssignedLabs
+                      ? labs.filter((l) => l.isMobile && userAssignedLabs.includes(l.id))
+                      : labs.filter((l) => l.isMobile)
+                    ).map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} ({l.capacity} máq)
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </div>
-            )}
 
-            {/* Filter by Education Level */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-700 font-medium">Segmento:</span>
-              <select
-                id="admin-filter-edu-level"
-                value={selectedEduLevel}
-                onChange={(e) => setSelectedEduLevel(e.target.value)}
-                className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
-              >
-                <option value="all">Todos os Segmentos</option>
-                <option value="basico">Ensino Básico</option>
-                <option value="superior">Ensino Superior</option>
-                <option value="ead">EAD</option>
-                <option value="outros">Outros</option>
-              </select>
+              {/* Filter by Date */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-700 font-medium">Data Específica:</span>
+                <input
+                  id="admin-filter-date"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="px-2 py-1 text-xs border border-slate-300 rounded-lg font-medium"
+                />
+                {selectedDate && (
+                  <button
+                    onClick={() => setSelectedDate('')}
+                    className="text-[11px] text-slate-500 hover:text-red-600 font-bold"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+
+              {/* Filter by Status */}
+              {activeTab === 'all' && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-700 font-medium">Status:</span>
+                  <select
+                    id="admin-filter-status"
+                    value={selectedStatus}
+                    onChange={(e) => setSelectedStatus(e.target.value)}
+                    className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="all">Todos os Status</option>
+                    <option value="pending">Pendente</option>
+                    <option value="confirmed">Confirmado</option>
+                    <option value="rejected">Recusado</option>
+                    <option value="cancelled">Cancelado</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Filter by Education Level */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-700 font-medium">Segmento:</span>
+                <select
+                  id="admin-filter-edu-level"
+                  value={selectedEduLevel}
+                  onChange={(e) => setSelectedEduLevel(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="all">Todos os Segmentos</option>
+                  <option value="basico">Ensino Básico</option>
+                  <option value="superior">Ensino Superior</option>
+                  <option value="ead">EAD</option>
+                  <option value="outros">Outros</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1172,16 +1405,94 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
             </div>
           )}
 
+          {/* Barra Informativa de Exibição e Status */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1 text-xs text-slate-600">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-slate-900">
+                {filteredBookings.length} {filteredBookings.length === 1 ? 'agendamento' : 'agendamentos'}
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="text-blue-700 font-semibold flex items-center gap-1">
+                {sortOrder === 'asc' ? (
+                  <>
+                    <ArrowUp className="w-3 h-3 text-blue-600" />
+                    <span>Ordem: Mais Antigo → Mais Novo</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowDown className="w-3 h-3 text-slate-600" />
+                    <span>Ordem: Mais Novo → Mais Antigo</span>
+                  </>
+                )}
+              </span>
+              {dateFilterScope === 'upcoming' && !selectedDate && (
+                <>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 text-[11px] font-medium flex items-center gap-1">
+                    <Check className="w-3 h-3 text-emerald-600" />
+                    Dias passados somem automaticamente
+                  </span>
+                </>
+              )}
+              {dateFilterScope === 'past' && (
+                <>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 text-[11px] font-bold">
+                    Visualizando Histórico Passado
+                  </span>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {pastBookingsCount > 0 && dateFilterScope !== 'past' && (
+                <button
+                  type="button"
+                  onClick={() => setDateFilterScope('past')}
+                  className="text-slate-500 hover:text-blue-700 text-[11px] flex items-center gap-1 underline underline-offset-2 cursor-pointer font-medium"
+                  title="Ver agendamentos de datas anteriores que já passaram"
+                >
+                  <History className="w-3 h-3" />
+                  <span>{pastBookingsCount} agendamento(s) encerrado(s) no histórico</span>
+                </button>
+              )}
+              {dateFilterScope === 'past' && (
+                <button
+                  type="button"
+                  onClick={() => setDateFilterScope('upcoming')}
+                  className="text-blue-600 hover:text-blue-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Voltar para agendamentos ativos</span>
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Table / List of Bookings */}
           {filteredBookings.length === 0 ? (
-            <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500">
+            <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500 space-y-3">
               <Clock className="w-10 h-10 text-slate-300 mx-auto mb-2" />
               <p className="font-semibold text-slate-700 text-sm">
-                Nenhum agendamento com estes filtros
+                {dateFilterScope === 'upcoming' && !selectedDate
+                  ? 'Nenhum agendamento futuro encontrado'
+                  : 'Nenhum agendamento com estes filtros'}
               </p>
-              <p className="text-xs text-slate-600 mt-0.5">
-                Altere os filtros acima para visualizar outros agendamentos.
+              <p className="text-xs text-slate-600 max-w-md mx-auto">
+                {dateFilterScope === 'upcoming' && pastBookingsCount > 0 && !selectedDate
+                  ? `Os agendamentos anteriores a hoje já encerraram e saíram automaticamente desta lista (${pastBookingsCount} no histórico).`
+                  : 'Altere os filtros acima para visualizar outros agendamentos.'}
               </p>
+              {pastBookingsCount > 0 && dateFilterScope === 'upcoming' && !selectedDate && (
+                <button
+                  type="button"
+                  onClick={() => setDateFilterScope('past')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 transition-colors cursor-pointer"
+                >
+                  <History className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Ver Histórico Passado ({pastBookingsCount} agendamentos)</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -1192,7 +1503,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
                       <th className="py-3 px-4">Status</th>
                       <th className="py-3 px-4">Professor & WhatsApp</th>
                       <th className="py-3 px-4">Laboratório & Turma</th>
-                      <th className="py-3 px-4">Data & Horário</th>
+                      <th className="py-3 px-4">
+                        <button
+                          type="button"
+                          onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                          className="flex items-center gap-1.5 hover:text-blue-700 transition-colors cursor-pointer group uppercase font-bold text-[11px]"
+                          title="Clique para alternar ordenação por data"
+                        >
+                          <span>Data & Horário</span>
+                          <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-0.5 normal-case ${
+                            sortOrder === 'asc' ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-700'
+                          }`}>
+                            {sortOrder === 'asc' ? (
+                              <>
+                                <ArrowUp className="w-2.5 h-2.5 text-blue-700" />
+                                <span>Mais Antigo</span>
+                              </>
+                            ) : (
+                              <>
+                                <ArrowDown className="w-2.5 h-2.5 text-slate-700" />
+                                <span>Mais Novo</span>
+                              </>
+                            )}
+                          </span>
+                        </button>
+                      </th>
                       {activeTab === 'mobile_route' ? (
                         <th className="py-3 px-4 text-rose-700 font-extrabold bg-rose-50/50">
                           🚚 Sala de Entrega
@@ -1288,13 +1623,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
 
                           {/* Data & Horário */}
                           <td className="py-3.5 px-4 whitespace-nowrap">
-                            <div className="font-medium text-slate-900">
-                              {formatDateBR(b.date)}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-slate-900">
+                                {formatDateBR(b.date)}
+                              </span>
+                              {b.date === todayStr && (
+                                <span className="px-1.5 py-0.5 text-[10px] font-extrabold bg-blue-100 text-blue-800 rounded-md border border-blue-200">
+                                  ★ Hoje
+                                </span>
+                              )}
+                              {b.date === tomorrowStr && (
+                                <span className="px-1.5 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 rounded-md border border-emerald-200">
+                                  Amanhã
+                                </span>
+                              )}
+                              {b.date < todayStr && (
+                                <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 text-slate-600 rounded-md border border-slate-200">
+                                  Passado
+                                </span>
+                              )}
                             </div>
                             <div className="text-slate-700 text-[11px] flex items-center gap-1 mt-0.5">
                               <Clock className="w-3 h-3 text-slate-600" />
                               <span>{b.timeSlot}</span>
                             </div>
+                            {b.previousDate && (
+                              <div
+                                className="text-[10px] text-blue-700 font-semibold flex items-center gap-1 mt-0.5"
+                                title={`Data original: ${formatDateBR(b.previousDate)} - Ajustado por ${b.dateAdjustedBy || 'TI'}`}
+                              >
+                                <span>🔄 Remarcado (era {formatDateBR(b.previousDate).split(' ')[0]})</span>
+                              </div>
+                            )}
                           </td>
 
                           {/* Sala / Local */}
@@ -1317,7 +1677,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ bookings, labs = LAB_LIS
 
                           {/* Ações */}
                           <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                              {/* Botão Ajustar Data (Admin ou Técnico) */}
+                              <button
+                                id={`adjust-date-btn-${b.id}`}
+                                onClick={() => {
+                                  setActiveAdjustBooking(b);
+                                  setIsAdjustModalOpen(true);
+                                }}
+                                title="Ajustar / Remarcar data e horário (Exclusivo Administrador e Técnico)"
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 cursor-pointer shadow-2xs"
+                              >
+                                <CalendarClock className="w-3.5 h-3.5 text-blue-600" />
+                                <span>Ajustar Data</span>
+                              </button>
+
                               {/* Botão de WhatsApp */}
                               <button
                                 id={`send-whatsapp-btn-${b.id}`}
@@ -1389,7 +1763,8 @@ const ScheduleMatrixView: React.FC<{
   bookings: Booking[];
   labs?: Lab[];
   onOpenWhatsApp: (b: Booking) => void;
-}> = ({ bookings, labs = LAB_LIST, onOpenWhatsApp }) => {
+  onAdjustDate?: (b: Booking) => void;
+}> = ({ bookings, labs = LAB_LIST, onOpenWhatsApp, onAdjustDate }) => {
   const [matrixDate, setMatrixDate] = useState(new Date().toISOString().split('T')[0]);
 
   const activeDayBookings = bookings.filter(
@@ -1486,13 +1861,26 @@ const ScheduleMatrixView: React.FC<{
                             🚚 {booking.roomNumber}
                           </div>
                         )}
-                        <button
-                          onClick={() => onOpenWhatsApp(booking)}
-                          className="mt-1 text-[10px] font-semibold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 cursor-pointer"
-                        >
-                          <MessageSquare className="w-2.5 h-2.5" />
-                          <span>WhatsApp</span>
-                        </button>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <button
+                            onClick={() => onOpenWhatsApp(booking)}
+                            className="text-[10px] font-semibold text-emerald-700 hover:text-emerald-900 flex items-center gap-0.5 cursor-pointer"
+                            title="Enviar WhatsApp"
+                          >
+                            <MessageSquare className="w-2.5 h-2.5" />
+                            <span>WhatsApp</span>
+                          </button>
+                          {onAdjustDate && (
+                            <button
+                              onClick={() => onAdjustDate(booking)}
+                              className="text-[10px] font-semibold text-blue-700 hover:text-blue-900 flex items-center gap-0.5 cursor-pointer"
+                              title="Ajustar data ou horário do agendamento"
+                            >
+                              <CalendarClock className="w-2.5 h-2.5" />
+                              <span>Ajustar</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     );
                   })}

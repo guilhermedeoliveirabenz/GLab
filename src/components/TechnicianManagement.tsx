@@ -395,7 +395,7 @@ export const TechnicianManagement: React.FC<TechnicianManagementProps> = ({
                         </span>
                         {!hasSpecificLabs ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
-                            Todos os Laboratórios (12)
+                            Todos os Laboratórios
                           </span>
                         ) : (
                           <div className="flex flex-wrap gap-1">

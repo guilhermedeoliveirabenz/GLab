@@ -170,16 +170,24 @@ export const TeacherMyBookings: React.FC<TeacherMyBookingsProps> = ({
     );
   });
 
-  const matchingBookings = userBookings.filter((b) => {
-    if (!query.trim()) return true;
-    const q = query.toLowerCase().trim();
-    return (
-      b.labName.toLowerCase().includes(q) ||
-      b.classGroup.toLowerCase().includes(q) ||
-      (b.subject && b.subject.toLowerCase().includes(q)) ||
-      b.date.includes(q)
-    );
-  });
+  const matchingBookings = userBookings
+    .filter((b) => {
+      if (!query.trim()) return true;
+      const q = query.toLowerCase().trim();
+      return (
+        b.labName.toLowerCase().includes(q) ||
+        b.classGroup.toLowerCase().includes(q) ||
+        (b.subject && b.subject.toLowerCase().includes(q)) ||
+        b.date.includes(q)
+      );
+    })
+    .sort((a, b) => {
+      const dateDiff = a.date.localeCompare(b.date);
+      if (dateDiff !== 0) return dateDiff;
+      const timeA = a.startTime || a.timeSlot || '';
+      const timeB = b.startTime || b.timeSlot || '';
+      return timeA.localeCompare(timeB);
+    });
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
